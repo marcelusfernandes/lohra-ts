@@ -111,7 +111,9 @@ const PRE_DIET_PARAMETERS_HASH: Record<(typeof PRE_DIET_NAMES)[number], string> 
   // #971: +`template` (run a saved template by ref) — a deliberate schema change.
   // #979: `spec` no longer repeats the node list (it lives once, derived from
   // `NODE_TYPES`, in the tool description) — a deliberate schema change.
-  run_workflow: "aec85fcbb8845194ebcf2d07b1ce29f947021dd60a8a42bdfb441371d608e28e",
+  // #981: `checkpoint_answers` also answers the 'escalate' nodes — its description (a parameter's
+  // own text) changed, deliberately, inside the line it already had.
+  run_workflow: "931abd509441ac3676f3c2dd7536c77cb2454f853b047bafbbb6653d31696eee",
   workflow_status: "4d792c11305edb0fe22443a5428e1946ca966d393e79f9ec0c392ccb570ac6ae",
   workflow_list: "8243f0af367f188a376f2c17b5eabe872a2f7a979813e0d4e2be6d594c2aa259",
   workflow_pause: "dffb37dbcca421f16f632f20a90caa589da2fcf7de07ece11dddd990780a30b8",
@@ -199,6 +201,30 @@ describe("run_workflow: closed node list and skill pointer survive the diet (#58
 
   it("is far shorter than the pre-diet 8,157-char manual", () => {
     expect(description().length).toBeLessThan(2500);
+  });
+});
+
+// #981 (S4): o `escalate` pausa pelo mesmo canal do `checkpoint`, e o modelo só descobre isso
+// pelas descrições. Elas mudam DENTRO das linhas que já existiam (o arquivo está no teto de 800
+// linhas) e o catálogo continua no orçamento.
+describe("the escalate pause is told where the model looks for it (#981)", () => {
+  const answers = (): string => {
+    const parameters = findTool("run_workflow").function.parameters as {
+      properties: { checkpoint_answers: { description: string } };
+    };
+    return parameters.properties.checkpoint_answers.description;
+  };
+
+  it("checkpoint_answers answers the 'escalate' nodes as well as the 'checkpoint' ones", () => {
+    expect(answers()).toMatch(/'checkpoint' and 'escalate' nodes/u);
+    expect(answers()).toContain("SCOPED");
+  });
+
+  it("workflow_status says an escalate pause carries {node_id, kind, summary}, with reason 'escalated'", () => {
+    const d = descriptionOf("workflow_status");
+    expect(d).toContain("escalated");
+    expect(d).toContain("{node_id, kind, summary}");
+    expect(d).toContain("A checkpoint pause carries {node_id, prompt, default?, rename_hint?}");
   });
 });
 

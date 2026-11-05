@@ -35,7 +35,7 @@ tool calls, do it yourself — a workflow costs a process, a pool and real token
 | A single leaf of work | `agent` | One prompt, one sub-agent, optional validated JSON back |
 
 Composition beats cleverness: most good specs are two or three nodes — a wide
-node, then one `agent` that reads its output and writes the answer. To branch on a value in the state (`switch`), load the `workflow-flow-control` skill.
+node, then one `agent` that reads its output and writes the answer. To branch on a value (`switch`), repeat until a check passes (`loop`), stop for a person only when a condition holds (`escalate`) or call a tool with no leaf (`call`), load the `workflow-flow-control` skill first.
 
 ### What each node returns
 
@@ -201,8 +201,7 @@ re-parse it in natural language — that is where null rates come from.
   `faults_total` — everything it has faulted on since it was launched, including
   what stopped the earlier stretch. When both are there, `faults_total` is the
   one to read before you trust the outputs.
-- **`paused` is not failure**, and `reason` tells you which one it is. Either
-  way the finished nodes are kept.
+- **`paused` is not failure**, and `reason` tells you which one it is; the finished nodes are kept.
   - **`quota_exhausted`** — the provider cut you off. The run **retries itself**
     (up to 5 attempts, waiting at least a minute and honouring the provider's own
     `retry-after`); `resume_at` and `attempts` say where it is up to. **Do not
@@ -217,9 +216,10 @@ re-parse it in natural language — that is where null rates come from.
     or under what the run already spent is **refused**, not launched — it would
     pause again on its first spawn. The tally continues across the resume, so
     the replayed cells are not charged twice.
-  - **`user_requested`** — you paused it yourself with `workflow_pause`. Nothing
-    resumes it on its own either (`resume_at` is `null`), and there is nothing to
-    raise: `run_workflow(resume_run_id=...)` continues it whenever you want.
+  - **`user_requested`** — you paused it yourself with `workflow_pause`. Nothing resumes it on its
+    own either (`resume_at` is `null`): `run_workflow(resume_run_id=...)` continues it whenever you want.
+  - **`escalated`** — an `escalate` node's `when` held (or could not be checked — it fails closed): the reply has `escalation{node_id, kind, summary}`.
+    Answer with `checkpoint_answers`, as for a `checkpoint`; nothing resumes it on its own.
 - **`resume_run_id` is cheap.** Cells that *completed* are content-addressed and
   replay from cache, carrying what they cost so the resume does not re-bill
   them; only what died, nulled or failed validation re-spawns. Use
@@ -276,7 +276,7 @@ of polling on their behalf.
 
 ### Previewing a resume, route pivots, and the artifact manifest
 
-- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes: `replay` (a cached cell covers it), `recompute {reason: "never_completed" | "identity_changed"}`, `checkpoint_pending` (reported by every `checkpoint` node the run has not reached yet while it is paused on a checkpoint — the paused one and any later checkpoint; non-checkpoint nodes downstream report `upstream_missing`/`unknown` instead), `upstream_missing` (an input the node needs was never computed), `token_budget_exhausted` (the run's cap is already spent) and `no_leaves` (a `parallel` node whose branches resolved to an empty array) — plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
+- **`workflow_preview {run_id, route?}`** dry-runs a resume before you commit to one — no token spent, nothing written, and none of the run's route pivots consumed. Per top-level node it reports one of several outcomes: `replay` (a cached cell covers it), `recompute {reason: "never_completed" | "identity_changed"}`, `checkpoint_pending` (reported by every `checkpoint` node the run has not reached yet while it is paused on a checkpoint — the paused one and any later checkpoint; non-checkpoint nodes downstream report `upstream_missing`/`unknown` instead), `escalation_pending` (the one `escalate` node that stopped the run), `upstream_missing` (an input the node needs was never computed), `token_budget_exhausted` (the run's cap is already spent) and `no_leaves` (a `parallel` node whose branches resolved to an empty array, or an `escalate` whose `when` did not hold) — plus totals including `cells_replayed`, `tokens_saved`, `leaves_to_spawn`, `estimated_tokens_to_repay`, and `pivots_used` — the pivots this run has *already* spent, unaffected by the preview call itself. Call it before `run_workflow(resume_run_id=..., route=...)` to see whether a candidate route is worth spawning. A nested `workflow` node still previews as `unknown` today regardless of the real resume's outcome — it does not yet get the operator's template loader.
 - **Resuming a `route_fault` pause onto a different route** works two ways: an explicit `route` (channel `operator`, always wins, even over the suggestion), or — resuming with no `route` at all — the operator's own `workflow_routes.json` (`<home>/workflow_routes.json`, an ordered per-dead-route fallback list). When it names an untried fallback for this exact dead route, `workflow_status`'s `lesson.suggested_route` carries it and the resume applies it on your behalf (channel `route_envelope`); with no matching entry, a route-less resume just stays on the current route. Both channels draw on the **same cap: 3 route pivots per run, total** — a 4th explicit `route` is refused. Every node a pivot actually rewrites is logged in `workflow_audit` as `node.rerouted {channel, pivot, from, to}`.
 - **The `artifacts` manifest** records every `write_file` a leaf calls with `ok: true` as `{node_id, sub_id, path, bytes}`, capped at 256 records per leaf. Two leaves in the same run writing the same `path` are never arbitrated — the last write wins on disk, silently — but the collision surfaces as an advisory entry in `workflow_status`'s `faults` (`"<node>: artifact path written by 2 leaves: <path>"`), never a `status` change. It is only checked within the current stretch: a collision against an earlier stretch, or against a parent run's artifacts from a nested `workflow` node, is not detected yet.
 

@@ -12,7 +12,7 @@ import {
   type RunControl,
   type WorkflowLoader,
 } from "./engine-contract.js";
-import { MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
+import { ANSWER_NODE_TYPES, MAX_NODE_MAX_ITERATIONS, MAX_NODE_RETRIES } from "./nodes.js";
 import { isEmptyOutput } from "./output-validation.js";
 import { resolveValue } from "./refs.js";
 import type { Awaitable, CausalContext, ChildResult } from "./runtime.js";
@@ -659,7 +659,7 @@ export async function siblingAnswers(
   loader: WorkflowLoader | undefined,
 ): Promise<Readonly<Record<string, unknown>>> {
   const ambiguous = new Set(
-    ordered.filter((node) => node.type === "checkpoint").map((node) => node.id),
+    ordered.filter((node) => ANSWER_NODE_TYPES.has(node.type)).map((node) => node.id),
   );
   if (loader !== undefined) {
     const context = Object.freeze({ args: Object.freeze({ ...args }) });
@@ -672,7 +672,7 @@ export async function siblingAnswers(
         const parsed = validateSpec(await loader(reference));
         if (parsed instanceof ValidationError) continue;
         for (const child of parsed.nodes)
-          if (child.type === "checkpoint") {
+          if (ANSWER_NODE_TYPES.has(child.type)) {
             if (seenOnce.has(child.id)) ambiguous.add(child.id);
             seenOnce.add(child.id);
           }

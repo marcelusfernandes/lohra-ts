@@ -1,7 +1,7 @@
 ---
 name: workflow-flow-control
-description: Make a dynamic workflow take a different road, or repeat a step, depending on the run's state. Covers the `switch` node — pick one of 2 to 16 cases by the value of a field and run only that case's leaf, with an `otherwise` and a `null` case that runs nothing — and the `loop` node — repeat a body until a mechanical predicate on its output holds (a score reaches a threshold, a list reaches a size), with a mandatory `max_rounds` cap of 1 to 16. Load it after `workflow-authoring` when the next step depends on a value (reuse an answer vs investigate, stop early vs continue) or when a result has to be refined until it passes a check. Do NOT load for a straight-line workflow where every node always runs, for a fan-out over a list (`parallel`, `pipeline`), for a human sign-off (`checkpoint`), or for "keep going until a round finds nothing new" (`loop_until_dry`).
-version: 1.1.0
+description: Make a dynamic workflow take a different road, or repeat a step, depending on the run's state. Covers the `switch` node — pick one of 2 to 16 cases by the value of a field and run only that case's leaf, with an `otherwise` and a `null` case that runs nothing — and the `loop` node — repeat a body until a mechanical predicate on its output holds (a score reaches a threshold, a list reaches a size), with a mandatory `max_rounds` cap of 1 to 16 — and the `escalate` node — pause the run for a person only when a predicate holds, with a `kind` and a `summary`, answered through `checkpoint_answers`. Load it after `workflow-authoring` when the next step depends on a value (reuse an answer vs investigate, stop early vs continue), when a result has to be refined until it passes a check, or when only the exceptional runs need a person. Do NOT load for a straight-line workflow where every node always runs, for a fan-out over a list (`parallel`, `pipeline`), for a human sign-off that must always happen (`checkpoint`), or for "keep going until a round finds nothing new" (`loop_until_dry`).
+version: 1.2.0
 ---
 
 # Flow control in dynamic workflows
@@ -13,7 +13,8 @@ needs a person". `switch` is the block that lets a spec take a different road
 **without** a different graph: the roads live inside one node, and only the one
 that matches the state runs. `loop` is the opposite need: the graph is right, but
 one step has to be repeated until its result passes a check, and nobody knows in
-advance how many passes that takes.
+advance how many passes that takes. `escalate` is for the third need: the run should
+go on alone, and stop for a person only in the cases that call for one.
 
 Read `workflow-authoring` first for node choice, sizing and refs. This skill only
 adds the control-flow blocks.
@@ -339,7 +340,154 @@ The loop keeps **one cell per round**: the round number, its rendered prompt (wh
 
 ---
 
-## 3. Checklist before calling `run_workflow` with flow control
+## 3. `escalate` — stop for a person only when a condition holds
+
+Reach for it when **most runs should go on alone and only the exceptions need a person**: a
+risk score over a bar, a loop that gave up, a classifier that is unsure. A `checkpoint` always
+stops the run; an `escalate` stops it only when its `when` predicate holds, and tells the
+reviewer why with a `kind` and a `summary`. Nothing in it calls a model: the condition is the
+same mechanical predicate `loop` uses.
+
+```json
+{
+  "meta": { "name": "release-gate" },
+  "schemas": {
+    "RISK": {
+      "type": "object",
+      "properties": { "risk": { "type": "number" }, "reason": { "type": "string" } },
+      "required": ["risk", "reason"]
+    }
+  },
+  "nodes": [
+    {
+      "id": "scan",
+      "type": "agent",
+      "prompt": "Rate the risk of shipping ${args.change} from 1 to 10 and say why.",
+      "schema_ref": "RISK"
+    },
+    {
+      "id": "review",
+      "type": "escalate",
+      "when": { "gte": { "path": "${scan.risk}", "n": 7 } },
+      "kind": "high_risk",
+      "summary": "Risk ${scan.risk} on ${args.change}: ${scan.reason}"
+    },
+    {
+      "id": "ship",
+      "type": "agent",
+      "prompt": "Write the release note for ${args.change}.",
+      "depends_on": ["review"]
+    }
+  ]
+}
+```
+
+With a risk under 7 the run goes straight through. With 7 or more it stops at `review`, and
+`ship` does not start until a person has answered.
+
+### The fields
+
+| Field     | What it is                                                                                                                                                                   |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `when`    | A predicate from the table in section 2: it holds, or the run goes on. It reads the state like any `${ref}`. There is no `${last}` here, and no `and`/`or`: chain two nodes. |
+| `kind`    | A short lowercase tag matching `^[a-z][a-z0-9_]{0,31}$` — the class of case, for the reviewer to sort by. It is never text and never a `${ref}`.                             |
+| `summary` | The text a person reads: **1 to 2000 characters**, `${ref}`s allowed. The human reads the summary, not the run — put in it what is needed to decide.                         |
+
+`required` and `depends_on` work as on any node. The node has **no routing knobs**
+(`model`, `tier`, `effort`, `provider`): it spawns nothing, so there is nothing to route, and
+they are refused as unknown fields. There is also no `default`: an escalation always waits for
+a person.
+
+### What it returns
+
+- `when` does not hold: `{escalated: false}`. No leaf, no cell, no fault of its own; the run goes on.
+- `when` holds and a person answered: `{escalated: true, kind, summary, answer}`. The answer can
+  be any JSON value, `false` and `""` included.
+- `when` holds and nobody has answered: the node is `null` and the run ends `paused`.
+- `when` cannot be checked, or the `summary` cannot be written: it fails **closed** — the run
+  ends `paused` as above, never past the node (see "When it fails").
+
+A later node can read `${review.escalated}` and, once it is `true`, `${review.answer}`. A `switch`
+on `${review.escalated}` is the clean way to use the answer only when there is one.
+
+### The pause
+
+The run ends with `status: paused` and a `reason` of `escalated` (`pause_reason` in a live
+`workflow_status`). The reply carries the `escalation` field, `{node_id, kind, summary}`, and a
+`hint`. In the ledger it is a `node.paused` event with `reason: "escalated"`, and
+`lohra workflow list` shows `paused (escalated: <kind>)`.
+
+Answer it through the same channel as a `checkpoint` —
+`run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": <answer>})` — because `checkpoint`
+and `escalate` are the two node types a person answers. Three things differ:
+
+- **There is no default, and nothing resumes it on its own.** A resume without the answer is
+  refused with an error that names the node and the summary, **before** it takes the run's lease:
+  the run stays exactly as it was, and no leaf is spent.
+- **Nodes after it wait.** The run stops at the node, so the ones that come later do not start.
+  A node with no link to the escalate may already have run, so a node that must not run before a
+  person has looked **`depends_on` the escalate**.
+- **It does not notify.** The pause is visible in `workflow_status`, `lohra workflow` and the
+  ledger; it posts no notice.
+
+Inside a nested `workflow` node the id is scoped, as for a checkpoint: `<workflow node id>.<escalate id>`
+(for example `sub.review`), and `node_id` in the reply already carries the form the answer
+must use. The bare escalate id is accepted while nothing else owns it. When it collides — with a
+`checkpoint` or an `escalate` at the root, or with a sibling nested `workflow` that uses the same
+inner id — only the scoped key is accepted, and the bare one is refused and named instead of
+answering the wrong node. If the scoped key is itself a root node's id, the reply carries
+`rename_hint`: resuming with it only pauses again.
+
+### When it fails — never silently
+
+| What happened                                                                         | What you see                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A node that `when` reads failed (its root is `null`), or a root the run does not have | The condition cannot be checked, so it is **held to be true** and the run pauses `escalated`. The summary opens with `[condition not evaluated: '<node>' has no value]`, and `faults` has `<id>: upstream null` plus the pause fault, which names the node. A root that is there but lacks the field is only a value (`gte` on nothing does not hold): that is not this case. |
+| The `summary` reads a value that is not there (a missing field, a `null`)             | The run pauses `escalated`. The summary goes out as the raw template behind `[unrendered]` — `[unrendered] Risk ${scan.risk}: ${scan.reason}` — and the pause fault names every `${ref}` with no value (`no value for ${scan.reason}`). Nodes that `depends_on` the escalate do not run.                                                                                      |
+| The summary renders blank                                                             | The run pauses `escalated`, with the raw template behind `[empty summary]`; the pause fault says `summary rendered empty`. It never goes out with an empty summary.                                                                                                                                                                                                           |
+| The summary is longer than 2000 characters once filled                                | It is cut at 2000 characters and ends with `…`, in the reply and in the output alike: it is cut, never dropped.                                                                                                                                                                                                                                                               |
+| The answer key collides with another node's                                           | The pause fault names the collision and the reply's `node_id` is the scoped key to use.                                                                                                                                                                                                                                                                                       |
+
+The rule behind the first three rows: an `escalate` exists to put a person in front of a decision,
+so a failure of its own **fails closed** — the run stops for a person, with the marker in the
+summary saying what could not be read, instead of going on without review. The person's answer
+is cached with the marked summary and the run continues; read the marker to know the case was not
+what the spec expected.
+
+### Resume and cache
+
+- `when` is read again on every run and is **not** part of the cell. A condition that stopped
+  holding after an answer was recorded does not ask again: the node is `{escalated: false}`.
+- The cell is `[id, "escalate", kind, summary]` with the summary as rendered, and it is written
+  only **once there is an answer**. After that a resume replays it with `cache.replayed` and the
+  node never asks again, whatever `checkpoint_answers` it is given.
+- A different summary (the case in front of the reviewer changed) or a different `kind` is a
+  new question: the node pauses again.
+- It spends no leaf and no token, so it never trips the fan-out limit or the token budget.
+- `workflow_preview` reports `escalation_pending` for the node that stopped the run (an
+  `escalate` the run never reached is `unknown`, because it may not even fire), `replay` once it
+  is answered, and `no_leaves` for one whose `when` did not hold.
+
+### Patterns
+
+- **Escalate only the exceptions.** An `agent` with a `schema` returns a score or a flag;
+  the `escalate` tests it with `gte` or `field_true`; the nodes that act `depends_on` the escalate.
+- **Hand a stuck loop to a person.** After a `loop`, escalate on
+  `{"not": {"of": {"field_true": {"path": "${refine.until_met}"}}}}`: the loop gave up at its
+  cap, and the summary can quote `${refine.last}`.
+- **Use the answer only when there is one.** A `switch` on `${review.escalated}` with `false`
+  as a `null` case and `true` as a case whose prompt reads `${review.answer}`.
+
+### What it is not
+
+- Not a `checkpoint`. That one always stops, takes a `default` so an unattended resume can carry
+  on, and asks a `prompt`. For a sign-off that must always happen, use `checkpoint`.
+- Not a model approving anything: no leaf runs, and the answer is whatever the person sends.
+- No `and`/`or` in `when`; compute one field in an `agent` with a `schema`, or chain two nodes.
+
+---
+
+## 4. Checklist before calling `run_workflow` with flow control
 
 For a `switch`:
 
@@ -362,3 +510,14 @@ For a `loop`:
 5. Does the node after the loop check `${refine.until_met}` if a loop that hit the cap must be
    treated differently from one that passed?
 6. Are the routing knobs on the node, not inside `body`?
+
+For an `escalate`:
+
+1. Is the condition something a predicate can test on one field? If not, compute that field in
+   an `agent` with a `schema` first.
+2. Does the `summary` say what a person needs to decide — the case, the number, the reason — and
+   stay under 2000 characters once its refs are filled in?
+3. Does every node that must not run before the answer `depends_on` the escalate?
+4. Is the `kind` a tag I would sort by (`^[a-z][a-z0-9_]{0,31}$`), not a sentence?
+5. Do later nodes read `${review.answer}` only when `${review.escalated}` is `true`?
+6. Is a sign-off that must **always** happen a `checkpoint` instead?

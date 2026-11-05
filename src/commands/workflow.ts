@@ -13,10 +13,12 @@ import {
   type TemplateListing,
 } from "../workflow/templates.js";
 import type { PublicAuditEvent } from "../workflow/audit-model.js";
+import { ESCALATED_HINT, ESCALATED_PAUSE } from "../workflow/service-rollup.js";
 import { productionWarningSink } from "../workflow/ownership-store.js";
 import {
   CHECKPOINT_HINT,
   CHECKPOINT_PAUSE,
+  durableFromRow,
   STALE_HINT,
   TOKEN_BUDGET_HINT,
   TOKEN_BUDGET_PAUSE,
@@ -73,6 +75,7 @@ function isStale(
  * it auto-resumes; there's nothing for the operator to do. */
 function pauseHint(pauseReason: string): string | null {
   if (pauseReason === CHECKPOINT_PAUSE) return CHECKPOINT_HINT;
+  if (pauseReason === ESCALATED_PAUSE) return ESCALATED_HINT;
   if (pauseReason === TOKEN_BUDGET_PAUSE) return TOKEN_BUDGET_HINT;
   if (pauseReason === USER_PAUSE) return USER_PAUSE_HINT;
   return null;
@@ -138,6 +141,13 @@ function drainAuditEvents(
   }
 }
 
+/** `: <kind>` for a run an `escalate` stopped (#981), so a list says what to look at; else nothing. */
+function escalationKind(row: Readonly<Record<string, unknown>>, pauseReason: string): string {
+  if (pauseReason !== ESCALATED_PAUSE) return "";
+  const kind = durableFromRow(row).checkpoint?.kind;
+  return typeof kind === "string" ? `: ${kind}` : "";
+}
+
 function render(
   database: Database.Database,
   repository: WorkflowRepository,
@@ -158,7 +168,8 @@ function render(
     budgetValue !== null && tokens > budgetValue ? ` (+${String(tokens - budgetValue)} over)` : "";
   const stale = isStale(database, row, now) ? " (stale)" : "";
   const pauseReason = status === "paused" ? text(row.pause_reason) : "";
-  const pauseSuffix = pauseReason !== "" ? ` (${pauseReason})` : "";
+  const pauseSuffix =
+    pauseReason !== "" ? ` (${pauseReason}${escalationKind(row, pauseReason)})` : "";
   return `${runId.slice(0, 8)}  ${status}${stale}${pauseSuffix}  ${String(state.done)}/${String(state.total)} nodes  ${String(tokens)}${budget} tok${over}  ${text(row.name)}`.trimEnd();
 }
 

@@ -1,13 +1,14 @@
 // Issue #979 (S2 do épico #976, desenho §9): a skill companheira
 // `workflow-flow-control` — a doutrina dos blocos de controle de fluxo
-// (`switch` e `loop` hoje; `escalate` e `call` nas issues seguintes), em
+// (`switch`, `loop` e `escalate` hoje; `call` na issue seguinte), em
 // `assets/skills/workflow-authoring/flow-control/SKILL.md`. O `SKILL.md`
 // principal já está em 800 linhas pela contagem do teste, então ele só ganha
 // um ponteiro, na mesma linha. Este arquivo é o anti-drift: os números e os
 // nomes que a skill cita vêm do código (`MAX_SWITCH_CASES`, `MAX_LOOP_ROUNDS`,
 // `PREDICATE_NAMES`, `NODE_SPECS`), de modo que mudar o limite sem mexer na
 // skill reprova aqui. Issue #980 (S3): a seção do `loop` e a tabela de
-// predicados.
+// predicados. Issue #981 (S4): a seção do `escalate`, o ponteiro do `SKILL.md`
+// principal alargado para os quatro blocos e o motivo `escalated` na seção 6.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,6 +17,9 @@ import { describe, expect, it } from "vitest";
 
 import { parseSkillMd, SkillStore } from "../src/skills/store.js";
 import {
+  ANSWER_NODE_TYPES,
+  ESCALATE_KIND,
+  MAX_ESCALATE_SUMMARY,
   MAX_LOOP_ROUNDS,
   MAX_SWITCH_CASES,
   NODE_SPECS,
@@ -126,11 +130,11 @@ describe("the switch section matches the code (#979)", () => {
 
 describe("the loop section matches the code (#980)", () => {
   const start = companion.indexOf("## 2. `loop`");
-  const end = companion.indexOf("## 3. Checklist");
+  const end = companion.indexOf("## 3. `escalate`");
   const section = companion.slice(start, end);
   const sectionFlat = section.replace(/\s+/gu, " ");
 
-  it("has its own section, ahead of the checklist", () => {
+  it("has its own section, ahead of the escalate section", () => {
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
   });
@@ -191,7 +195,7 @@ describe("the loop section matches the code (#980)", () => {
 
   it("every ```json example in the skill is a spec the validator accepts", () => {
     const blocks = [...companion.matchAll(/```json\n([\s\S]*?)\n```/gu)].map((match) => match[1]);
-    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
     const types = blocks.flatMap((block) => {
       const result = validateSpec(JSON.parse(block ?? "null"));
       expect(result).toBeInstanceOf(WorkflowSpec);
@@ -199,5 +203,109 @@ describe("the loop section matches the code (#980)", () => {
     });
     expect(types).toContain("switch");
     expect(types).toContain("loop");
+    expect(types).toContain("escalate");
+  });
+});
+describe("the escalate section matches the code (#981)", () => {
+  const start = companion.indexOf("## 3. `escalate`");
+  const end = companion.indexOf("## 4. Checklist");
+  const section = companion.slice(start, end);
+  const sectionFlat = section.replace(/\s+/gu, " ");
+
+  it("has its own section, between the loop and the checklist", () => {
+    expect(start).toBeGreaterThan(companion.indexOf("## 2. `loop`"));
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it("states the summary cap and the kind pattern that the code holds", () => {
+    expect(sectionFlat).toContain(`1 to ${String(MAX_ESCALATE_SUMMARY)} characters`);
+    expect(section).toContain(ESCALATE_KIND.source);
+  });
+
+  it("names every field of the node, and says the routing knobs and `default` are refused", () => {
+    const spec = NODE_SPECS.escalate;
+    expect(spec).toBeDefined();
+    const own = (spec?.fields ?? []).filter((field) => !["required", "depends_on"].includes(field));
+    expect(own.sort()).toEqual(["kind", "summary", "when"]);
+    for (const field of own) expect(section).toContain(`\`${field}\``);
+    for (const knob of ROUTING_FIELDS) expect(section).toContain(`\`${knob}\``);
+    expect(section).toContain("`default`");
+    expect(sectionFlat).toMatch(/no routing knobs?|refuses? (the )?routing knobs?/u);
+  });
+
+  it("states what the node returns, with and without the pause", () => {
+    expect(section).toContain("{escalated: false}");
+    expect(section).toContain("{escalated: true, kind, summary, answer}");
+  });
+
+  it("says how the pause reads: the reason, the escalation, the ledger and the answer channel", () => {
+    expect(section).toContain("`escalated`");
+    expect(section).toContain("`escalation`");
+    expect(section).toContain("{node_id, kind, summary}");
+    expect(section).toContain("node.paused");
+    expect(section).toContain("checkpoint_answers");
+    for (const type of ANSWER_NODE_TYPES) expect(section).toContain(`\`${type}\``);
+  });
+
+  it("says a resume without the answer is refused, and that nothing resumes the run on its own", () => {
+    expect(sectionFlat).toMatch(/refused/u);
+    expect(sectionFlat).toMatch(/lease/u);
+    expect(sectionFlat).toMatch(/nothing resumes|never resumes/u);
+  });
+
+  it("explains the scoped id inside a nested workflow, as the checkpoint has it", () => {
+    expect(section).toContain("<workflow node id>.<escalate id>");
+    expect(sectionFlat).toMatch(/collid/u);
+  });
+
+  it("documents the failure modes: a dead upstream and a summary that is cut", () => {
+    expect(sectionFlat).toContain("upstream null");
+    expect(sectionFlat).toMatch(/cut|truncated/u);
+    expect(section).toContain("…");
+  });
+
+  it("says it fails closed: a condition it cannot check, a summary it cannot write or that is blank, all pause", () => {
+    expect(sectionFlat).toMatch(/fails? \*\*closed\*\*/u);
+    expect(section).toContain("[condition not evaluated:");
+    expect(section).toContain("[unrendered]");
+    expect(section).toContain("[empty summary]");
+    expect(section).toContain("no value for ${scan.reason}");
+    expect(sectionFlat).toContain("summary rendered empty");
+    expect(sectionFlat).toMatch(/held to be true/u);
+    expect(sectionFlat).toMatch(/do not run/u);
+    // the old promise, that a failure here lets the run go on, must be gone
+    expect(sectionFlat).not.toMatch(/does \*\*not\*\* pause/u);
+    expect(sectionFlat).not.toMatch(/the run does not pause/u);
+  });
+
+  it("says how a resume, the cell and the preview behave", () => {
+    expect(sectionFlat).toMatch(/never asks again/u);
+    expect(sectionFlat).toMatch(/new question|different question/u);
+    expect(section).toContain("escalation_pending");
+    expect(section).toContain("no_leaves");
+  });
+
+  it("says when to use a checkpoint instead", () => {
+    expect(sectionFlat).toMatch(/always (stops|pauses)/u);
+    expect(section).toContain("`checkpoint`");
+  });
+
+  it("the skill's description offers it", () => {
+    expect(parseSkillMd(companion).description).toContain("escalate");
+  });
+});
+
+describe("workflow-authoring points at all four blocks and documents the new pause (#981)", () => {
+  const pointer = main.split("\n").find((line) => line.includes("workflow-flow-control")) ?? "";
+
+  it("the pointer names the companion skill and the four nodes it covers", () => {
+    expect(pointer).not.toBe("");
+    for (const node of ["switch", "loop", "escalate", "call"])
+      expect(pointer, node).toContain(`\`${node}\``);
+  });
+
+  it("the pause reasons list the `escalated` one, and the preview list the new outcome", () => {
+    expect(main).toMatch(/\*\*`escalated`\*\*/u);
+    expect(main).toContain("escalation_pending");
   });
 });

@@ -15,7 +15,7 @@ import {
 import { WorkflowEngine } from "./engine.js";
 import { AutoResumeScheduler, LeaseHeartbeat, type Timer } from "./durability.js";
 import {
-  CHECKPOINT_PAUSE,
+  answerPauseNoun,
   liveRuntimeOf,
   nextPivots,
   progressJsonOf,
@@ -557,22 +557,18 @@ export class WorkflowService {
     const attempt = (priorView?.attempts ?? 0) + 1; // shared below and by pausePayload
     const now = store.ownershipOf().now;
     const answers: Record<string, unknown> = { ...(options.checkpointAnswers ?? {}) };
-    if (
-      !explicitSpec &&
-      priorView !== null &&
-      priorView.status === "paused" &&
-      priorView.pause_reason === CHECKPOINT_PAUSE
-    ) {
+    const noun = answerPauseNoun(priorView?.pause_reason ?? null);
+    if (!explicitSpec && priorView !== null && priorView.status === "paused" && noun !== null) {
       const pending = priorView.checkpoint ?? {};
       const nodeId = pending.node_id;
       if (typeof nodeId === "string" && nodeId !== "" && !(nodeId in answers)) {
         if ("default" in pending) answers[nodeId] = pending.default;
         else {
-          const promptText = typeof pending.prompt === "string" ? pending.prompt : "";
-          const nodeIdText: string = typeof nodeId === "string" ? nodeId : JSON.stringify(nodeId);
+          const asked = pending.prompt ?? pending.summary; // a checkpoint's prompt, an escalation's summary
+          const promptText = typeof asked === "string" ? asked : "";
           return Object.freeze({
             error:
-              `workflow run '${resumeRunId as string}' is paused at checkpoint '${nodeIdText}' ` +
+              `workflow run '${resumeRunId as string}' is paused at ${noun} '${nodeId}' ` +
               `and is waiting for an answer: ${promptText}\n` +
               `    e.g. checkpoint_answers: {"${nodeId}": "<your answer>"}`,
           });

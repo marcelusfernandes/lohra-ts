@@ -191,10 +191,12 @@ const SAFE_STRING_VALUES: Readonly<Record<string, ReadonlySet<string>>> = Object
     // reason, not a NEW private string (checked against
     // `CHECKPOINT_PAUSE`/`QUOTA_PAUSE`/`TOKEN_BUDGET_PAUSE`/`USER_PAUSE` in
     // service.ts, so a sixth value would be a bug, not a leak). Issue #426
-    // (M10-S5) added the 5th, `route_fault` (below, alphabetical slot).
+    // (M10-S5) added the 5th, `route_fault` (below, alphabetical slot);
+    // issue #981 (épico #976) the 6th, `escalated` (`flow-escalate.ts`).
     "checkpoint",
     "corrupt_payload",
     "drop_bucket_overflow",
+    "escalated",
     // Issue #461 (M11-S3): `cache.missed`'s own reason — a miss with no
     // prior cell for this node at all (`identity_changed` is the sibling
     // value, below) — carried only when the caller named a `nodeId`

@@ -478,7 +478,7 @@ export const BUILTIN_DEFINITIONS = [
           checkpoint_answers: {
             type: "object",
             description:
-              "Answers for the 'checkpoint' nodes a previous stretch of this run paused on, keyed by node id: {\"approve\": \"yes\"}. Each answer becomes that node's output and is cached, so the same question is never asked twice. A checkpoint inside a nested 'workflow' node reports a SCOPED node_id ('<sub_node_id>.<checkpoint_id>', e.g. \"sub.confirm\") — the bare checkpoint id is still accepted as long as it doesn't collide with a checkpoint at the root or a sibling nested workflow; once it does, only that exact scoped key is accepted and the bare id is refused as ambiguous instead of silently going to the wrong node.",
+              "Answers for the 'checkpoint' and 'escalate' nodes a previous stretch of this run paused on, keyed by node id: {\"approve\": \"yes\"}. Each answer becomes that node's output and is cached, so the same question is never asked twice. A checkpoint or escalate inside a nested 'workflow' node reports a SCOPED node_id ('<sub_node_id>.<checkpoint_id>', e.g. \"sub.confirm\") — the bare checkpoint id is still accepted as long as it doesn't collide with a checkpoint at the root or a sibling nested workflow; once it does, only that exact scoped key is accepted and the bare id is refused as ambiguous instead of silently going to the wrong node.",
           },
           token_budget: {
             type: "integer",
@@ -500,7 +500,7 @@ export const BUILTIN_DEFINITIONS = [
     type: "function",
     function: {
       description:
-        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}. 'sandbox_refusals' is ADVISORY, never on its own flips 'status' from 'complete'. Other rollup fields glossed in the workflow-authoring skill.",
+        "Poll a workflow run's status/outputs by run_id. 'wait' blocks until done; 'progress' is live mid-run. 'paused' means stopped resumably \u2014 finished nodes kept; resume with run_workflow(resume_run_id=...). A checkpoint pause carries {node_id, prompt, default?, rename_hint?}; an escalate pause (reason 'escalated') carries {node_id, kind, summary} as 'escalation'. 'sandbox_refusals' is ADVISORY, never on its own flips 'status' from 'complete'. Other rollup fields glossed in the workflow-authoring skill.",
       parameters: {
         type: "object",
         properties: {

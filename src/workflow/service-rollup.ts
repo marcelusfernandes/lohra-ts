@@ -10,6 +10,7 @@ import type { Budget } from "./budget.js";
 import type { RunArtifact, RunResult } from "./accounting.js";
 import type { AuditedChildRuntime } from "./audit-runtime.js";
 import type { ProgressSnapshot } from "./progress.js";
+import { ESCALATED_PAUSE } from "./nodes.js";
 import type { RouteOverride } from "./route-override.js";
 import { ROUTE_FAULT_REASON } from "./route-faults.js";
 import type { WorkflowSpec } from "./types.js";
@@ -25,6 +26,7 @@ export { nextPivots, artifactsOf } from "./route-override.js";
 // re-exported from service.ts (`export { … } from "./service-rollup.js"`)
 // so `commands/workflow.ts` and existing tests keep importing them from
 // `service.js` unchanged.
+export { ESCALATED_PAUSE };
 export const CHECKPOINT_PAUSE = "checkpoint";
 export const TOKEN_BUDGET_PAUSE = "token_budget_exhausted";
 export const USER_PAUSE = "user_requested";
@@ -36,6 +38,21 @@ export const CHECKPOINT_HINT =
   'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": ' +
   '<answer>}) — a nested checkpoint\'s node_id is scoped (e.g. "sub.confirm"); ' +
   "a checkpoint that declared a 'default' takes it if you resume without one — if the payload carries 'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two checkpoint ids in the spec instead";
+export const ESCALATED_HINT =
+  "this run is paused for your review — an escalate node's condition held. Read the " +
+  "escalation {node_id, kind, summary}, decide, and answer with " +
+  'run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": <answer>}) — a nested ' +
+  'escalate\'s node_id is scoped (e.g. "sub.review"). There is no default: nothing will resume it ' +
+  "on its own, and a resume without the answer is refused — if the escalation carries " +
+  "'rename_hint', resuming with the SAME node_id only pauses again — rename one of the two ids in " +
+  "the spec instead";
+/**
+ * What a run paused for a human answer in `checkpoint_answers` waits at, as the word a message
+ * uses (`checkpoint` or `escalation`); `null` for any other pause. The durable resume guard
+ * (`service.ts`, at its line ceiling) asks "is it one?" and "which?" with this single name.
+ */
+export const answerPauseNoun = (reason: string | null): "checkpoint" | "escalation" | null =>
+  reason === CHECKPOINT_PAUSE ? "checkpoint" : reason === ESCALATED_PAUSE ? "escalation" : null;
 export const USER_PAUSE_HINT =
   "you paused this run; nothing will resume it on its own — its " +
   "finished nodes are kept, so run_workflow(resume_run_id=...) " +
@@ -91,6 +108,17 @@ function withPivots(
   return pivots.length === 0 ? view : { ...view, pivots: [...pivots] };
 }
 
+/** #981: a run an `escalate` stopped shows its payload as `escalation`, with the hint, in the live
+ * view as `pauseFields` does in the durable one — the generic `checkpoint` key still carries it. */
+function withEscalation(
+  view: Readonly<Record<string, unknown>>,
+  result: RunResult,
+): Readonly<Record<string, unknown>> {
+  return result.pauseReason === ESCALATED_PAUSE
+    ? { ...view, escalation: result.checkpoint, hint: ESCALATED_HINT }
+    : view;
+}
+
 /** #463: molde `withPivots` — omitted (never a bare `[]`) for a run whose
  * leaves never wrote anything. */
 function withArtifacts(
@@ -127,6 +155,9 @@ export function pauseFields(view: PausedRunLike): Readonly<Record<string, unknow
   } else if (view.pause_reason === CHECKPOINT_PAUSE) {
     fields.checkpoint = view.checkpoint;
     fields.hint = CHECKPOINT_HINT;
+  } else if (view.pause_reason === ESCALATED_PAUSE) {
+    fields.escalation = view.checkpoint;
+    fields.hint = ESCALATED_HINT;
   } else if (view.pause_reason === USER_PAUSE) {
     fields.hint = USER_PAUSE_HINT;
   } else if (view.pause_reason === ROUTE_FAULT_REASON) fields.lesson = view.checkpoint;
@@ -142,6 +173,11 @@ export function resultView(
   record: LiveRunLike,
   result: RunResult,
 ): Readonly<Record<string, unknown>> {
+  return Object.freeze(withEscalation(liveView(record, result), result));
+}
+
+/** The envelope `resultView` starts from — everything but the escalation (#981). */
+function liveView(record: LiveRunLike, result: RunResult): Readonly<Record<string, unknown>> {
   return Object.freeze(
     withTemplate(
       withArtifacts(
