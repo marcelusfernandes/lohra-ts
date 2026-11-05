@@ -57,6 +57,8 @@ import { WorkflowEngine } from "./engine.js";
 import { topologicalOrder } from "./graph.js";
 import { applyRouteOverrideToSpec, type RouteOverride } from "./route-override.js";
 import type {
+  CallToolRequest,
+  CallToolResult,
   ChildCollectOptions,
   ChildResult,
   ChildRuntime,
@@ -92,6 +94,7 @@ export type PreviewOutcome =
   | "recompute"
   | "checkpoint_pending"
   | "escalation_pending"
+  | "would_call"
   | "upstream_missing"
   | "token_budget_exhausted"
   | "nested"
@@ -144,7 +147,18 @@ interface RecordedSpawn {
  * fault and lets the run keep going, node by node. */
 class DryRuntime implements ChildRuntime {
   readonly spawns: RecordedSpawn[] = [];
+  /** #982: the model-free calls a `call` node would make — recorded, never made, never a leaf. */
+  readonly calls: RecordedSpawn[] = [];
   private seq = 0;
+
+  /** `denied` is the one status a `call` never retries, so a node that would call asks once. */
+  callTool(request: CallToolRequest): CallToolResult {
+    this.calls.push({
+      nodePath: request.causalContext.nodePath,
+      cellId: request.causalContext.cellId,
+    });
+    return { status: "denied", output: toolError("preview: would call") };
+  }
 
   spawn(request: ChildSpawnRequest): string {
     this.seq += 1;
@@ -302,13 +316,15 @@ function measuredAverageTokensPerCell(database: Database.Database, runId: string
 interface ClassifyContext {
   readonly facade: PreviewCacheFacade;
   readonly spawnsByOwner: ReadonlyMap<string, OwnerSpawns>;
+  /** The top-level nodes that would make a model-free call (#982). */
+  readonly callOwners: ReadonlySet<string>;
   readonly outputs: Readonly<Record<string, unknown>>;
   readonly faults: readonly string[];
   readonly pauseReason: string | null;
 }
 
 function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
-  const { facade, spawnsByOwner, outputs, faults, pauseReason } = ctx;
+  const { facade, spawnsByOwner, callOwners, outputs, faults, pauseReason } = ctx;
   const hits = facade.hitsByOwner.get(node.id);
   const spawns = spawnsByOwner.get(node.id);
   if (node.type === "workflow" && ((hits?.count ?? 0) > 0 || (spawns?.count ?? 0) > 0)) {
@@ -324,6 +340,11 @@ function classifyNode(node: Node, ctx: ClassifyContext): PreviewNodeOutcome {
   if ((spawns?.count ?? 0) > 0) {
     const reason = facade.missReasonByOwner.get(node.id) ?? "never_completed";
     return { node_id: node.id, type: node.type, outcome: "recompute", reason };
+  }
+  // #982: a `call` with no cell would make its call — not a leaf, so it never counts in
+  // `leaves_to_spawn`; one with a cell is a `replay`, below.
+  if (callOwners.has(node.id)) {
+    return { node_id: node.id, type: node.type, outcome: "would_call" };
   }
   if ((hits?.count ?? 0) > 0) {
     return { node_id: node.id, type: node.type, outcome: "replay" };
@@ -467,9 +488,11 @@ export async function previewResume(deps: PreviewDeps): Promise<PreviewResult | 
     spawnsByOwner.set(owner, bucket);
   }
 
+  const callOwners = new Set(runtime.calls.map((call) => firstSegment(call.nodePath[0] ?? "")));
   const classifyContext: ClassifyContext = {
     facade,
     spawnsByOwner,
+    callOwners,
     outputs: result.outputs,
     faults: result.faults,
     pauseReason: control.pauseReason,

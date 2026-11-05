@@ -144,9 +144,10 @@ function runWith(
 
 describe("FLOW_STRATEGIES (#977)", () => {
   // #979 (S2): `switch` is the first node a later issue adds through the table; #980 (S3): `loop`;
-  // #981 (S4): `escalate`.
-  it("carries completeness_check, checkpoint, escalate, loop and switch, frozen, and only for types the spec accepts", () => {
+  // #981 (S4): `escalate`; #982 (S6): `call`.
+  it("carries call, completeness_check, checkpoint, escalate, loop and switch, frozen, and only for types the spec accepts", () => {
     expect(Object.keys(FLOW_STRATEGIES).sort()).toEqual([
+      "call",
       "checkpoint",
       "completeness_check",
       "escalate",
@@ -157,9 +158,9 @@ describe("FLOW_STRATEGIES (#977)", () => {
     for (const type of Object.keys(FLOW_STRATEGIES)) expect(NODE_TYPES.has(type)).toBe(true);
   });
 
-  it("NODE_TYPES is the ten types the seam started with plus the nodes added through it: switch, loop, escalate", () => {
+  it("NODE_TYPES is the ten types the seam started with plus the nodes added through it: switch, loop, escalate, call", () => {
     expect([...NODE_TYPES].sort().join(",")).toBe(
-      "agent,checkpoint,completeness_check,escalate,gate,judge_panel,loop,loop_until_dry,parallel,pipeline,switch,verify,workflow",
+      "agent,call,checkpoint,completeness_check,escalate,gate,judge_panel,loop,loop_until_dry,parallel,pipeline,switch,verify,workflow",
     );
   });
 
