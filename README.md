@@ -8,9 +8,8 @@ duráveis, cron, MCP, ferramentas web e mídia. A versão atual é `0.0.13`.
 O runtime nasceu como port validado contra o runtime Python pinado até
 2026-09-04; desde essa data, por decisão do owner, evolui de forma
 independente do Python ([ADR 0003](docs/adr/0003-native-wire-format.md)). O
-pacote de produção não
-embute nem chama Python, pip, uv ou poetry; o Python aparece apenas no
-histórico de paridade do repositório de desenvolvimento.
+pacote de produção não embute nem chama Python, pip, uv ou poetry; o Python
+aparece apenas no histórico de paridade do repositório de desenvolvimento.
 
 ## Instalação
 
@@ -423,8 +422,8 @@ reexecutados, só o trabalho que ainda faltava quando o processo anterior
 parou (issue #103, `tests/workflow-cross-process.test.ts`).
 
 `list` e `watch` mostram por que um run pausou: a linha de status ganha um
-sufixo `(<pause_reason>)` — `checkpoint`, `token_budget_exhausted`,
-`user_requested`, `quota_exhausted` ou `route_fault` (5º valor, M10-S5) — e,
+sufixo `(<pause_reason>)` — `checkpoint`, `escalated`, `token_budget_exhausted`,
+`user_requested`, `quota_exhausted` ou `route_fault` — e,
 quando o gasto de tokens excede `token_budget`, o campo de tokens ganha
 `(+N over)` (`1100/1000 tok (+100 over)`). `watch` ainda escreve no stderr a
 dica de retomada certa (a mesma que `run_workflow` devolve como `hint`)
@@ -465,8 +464,12 @@ replayaria, o que recomputaria e por quê — sem gastar token, sem escrever
 nada e sem consumir um dos 3 pivôs de rota do run. `workflow_templates` lista a biblioteca
 (`~/.lohra/workflows/<ref>.json`): specs do operador e os que o orquestrador guardou com
 `workflow_save` a partir de um run `complete`, com origem e placar de runs; `run_workflow {template}`
-roda um pelo nome e `lohra workflow templates` mostra o placar. Detalhes, tetos e o que cada um NÃO faz em
-[`docs/workflow-supervision.md`](docs/workflow-supervision.md).
+roda um pelo nome e `lohra workflow templates` mostra o placar. O orquestrador também
+monta workflows com `call` (lê um arquivo ou uma página sem modelo), `switch`, `loop`
+(`max_rounds` de 1 a 16) e `escalate` (pausa o run só quando uma condição vale), que a
+skill `workflow-flow-control` ensina. O `call` só lê a pasta de trabalho do run e as de
+`fs_allow` (`workflow_policy.json`); `"execution"` em `workflow_tiers.json` define o tier
+de quem não nomeia modelo. Detalhes, tetos e limites em [`docs/workflow-supervision.md`](docs/workflow-supervision.md).
 
 A tool `list_models` reporta `context_window` por modelo — a janela de
 contexto que o próprio provedor expõe em `/models` (`context_length` no
@@ -762,8 +765,7 @@ updates: npm registry responded with status 404` em stderr e sai `1`.
 ## Histórico de paridade
 
 Até 2026-09-04 o runtime era desenvolvido como port validado bilateralmente
-contra o oracle Python pinado no SHA
-`16b4785d803ad0ca364a8a67346a04f949fbf592`
+contra o oracle Python pinado no SHA `16b4785d803ad0ca364a8a67346a04f949fbf592`
 ([ADR 0003](docs/adr/0003-native-wire-format.md)). O aggregate de closeout
 comparava um inventário fechado nos dois sentidos, executava cada suíte
 não-live duas vezes e recusava scripts ausentes, órfãos, skips, resultados não
@@ -779,11 +781,9 @@ servidor/driver que sobrou vive em `scripts/stub/{driver,server,types}.ts`.
 `mutations:closeout` foi retirado do `package.json` em #153: os 8 mutantes
 que miravam `src/` migraram para `mutations:self-update` (hoje agregado por
 `npm run mutations:all`, ver [docs/mutation-testing.md](docs/mutation-testing.md));
-os outros 27 miravam artefato exclusivo do processo de closeout T22 e foram
-aposentados com registro em `docs/regression-inventory.md`.
-
-O relatório completo dos 23 tickets, SHAs e dívidas do fechamento está em
-[docs/closeout.md](docs/closeout.md).
+os outros 27, exclusivos do closeout T22, foram aposentados com registro em
+`docs/regression-inventory.md`. O relatório completo dos 23 tickets, SHAs e
+dívidas do fechamento está em [docs/closeout.md](docs/closeout.md).
 
 ## Decisão arquitetural
 
