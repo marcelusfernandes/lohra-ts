@@ -109,13 +109,15 @@ release.yml:  publica no npm com provenance e cria a GitHub Release (D7, abaixo)
 
 ## Publicação (D7, `.github/workflows/release.yml`)
 
-O push de uma tag `v*` dispara `release.yml` (#536). O job, num só runner
-Ubuntu com Node 22:
+O push de uma tag `v*` dispara `release.yml` (#536). O mesmo job também
+aceita `workflow_dispatch` com input `tag`, para republicar uma tag que já
+existe sem movê-la (ver abaixo). O job, num só runner Ubuntu com Node 22:
 
 1. confere que a tag aponta para um commit de `main` (`git merge-base
---is-ancestor`) e que `v<versão>` bate com `package.json#version` —
+--is-ancestor HEAD`) e que `v<versão>` bate com `package.json#version` —
    qualquer divergência falha antes de instalar;
-2. `npm ci` → `npm run build` → `npm run pack:check` (o mesmo gate do CI);
+2. instala `npm@11.21.2` e então `npm ci` → `npm run build` →
+   `npm run pack:check` (o mesmo gate do CI);
 3. `npm pack` e `npm publish --provenance --access public` com
    `LOHRA_SKIP_PREPARE=1` — a autenticação é OIDC (`id-token: write`) via
    **trusted publisher** configurado pelo owner na página do pacote no npm
@@ -123,6 +125,37 @@ Ubuntu com Node 22:
    nenhum token vive no repo nem em `secrets`;
 4. `gh release create v<versão>` anexando o `.tgz` e a seção
    `## [<versão>]` do `CHANGELOG.md` como notas.
+
+Trusted publishing exige npm >= 11.5.1; o npm que vem com o Node 22 é 10.x.
+O pin é `11.21.2`, não o dist-tag latest: no
+[run 42035117059](https://github.com/marcelusfernandes/lohra-ts/actions/runs/42035117059)
+esse dist-tag instalou o npm 12.2.2, e `npm pack --json` passou a ser um
+objeto indexado pelo nome do pacote (`{ "lohra-ts": { "filename": "…" } }`).
+`scripts/pack-check.ts` lê `[0].filename`; com o objeto o campo vem
+`undefined` e o script lança `PACK_TARBALL_MISSING` (linha 546). A linha 11
+ainda emite `[{ "filename": "lohra-ts-<versão>.tgz" }]`. O conserto fica no
+workflow para o tarball da tag não precisar de outro `pack-check.ts`.
+
+### Republicar uma tag que já existe
+
+`workflow_dispatch` roda o `release.yml` da ref em que o dispatch é
+disparado (depois do merge, `main`) e faz checkout da tag. O `.tgz` é a
+árvore da tag. A tag não é movida nem recriada.
+
+Para publicar `v0.1.0` (commit `fe15fe0b5c52d7f4af9888fb10bc103d46cf5b5c`)
+quando este workflow já estiver em `main`:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+Não usar `--ref v0.1.0`: isso seleciona o `release.yml` congelado na tag,
+que ainda instala o dist-tag latest. Não usar "Re-run" do run 42035117059,
+pelo mesmo motivo.
+
+A procedência SLSA grava `GITHUB_SHA` e `GITHUB_REF` do run do Actions
+(`libnpmpublish`). Num dispatch a partir de `main`, esse SHA é o do
+workflow em `main`, não o commit da tag. O `.tgz` sai do checkout da tag.
 
 `tests/ci-release-workflow.test.ts` pina essa forma (gatilho, permissões,
 ordem dos steps, ausência de `NODE_AUTH_TOKEN`/`secrets.`). O primeiro
