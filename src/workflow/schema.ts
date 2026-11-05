@@ -8,8 +8,8 @@ import {
   STAGE_FIELDS,
   SUB_OBJECT_FIELDS,
 } from "./nodes.js";
-import { findRefs, invalidRefs, isValidRef } from "./refs.js";
-import { issue, record, validateByType } from "./schema-nodes.js";
+import { findRefs, invalidRefs } from "./refs.js";
+import { issue, record, validateByType, validateRefTargets } from "./schema-nodes.js";
 import { Node, SpecIssue, ValidationError, WorkflowSpec } from "./types.js";
 
 export interface ValidateSpecOptions {
@@ -96,7 +96,7 @@ interface SchemaSubObject {
  * Agent-shaped sub-objects where `schema`/`schema_ref` are meaningful
  * because the engine's `schemaOf` (`engine.ts:347-355`) reads them off this
  * same object at runtime: `loop_until_dry.body`, `gate.body`,
- * `judge_panel.synthesize`, each `switch.cases[*]` (#979) and each `pipeline.stages[*]`. A `parallel`
+ * `judge_panel.synthesize`, `loop.body` (#980), each `switch.cases[*]` (#979) and each `pipeline.stages[*]`. A `parallel`
  * branch that is itself an object is scanned too (#238) — the engine still
  * renders it wholesale into the leaf prompt (`renderValue` in `engine.ts`'s
  * `runParallel`), unchanged by this scan; a string/ref branch, the common
@@ -105,7 +105,7 @@ interface SchemaSubObject {
  */
 function schemaBearingSubObjects(node: Node): readonly SchemaSubObject[] {
   const targets: SchemaSubObject[] = [];
-  if (node.type === "gate" || node.type === "loop_until_dry") {
+  if (node.type === "gate" || node.type === "loop_until_dry" || node.type === "loop") {
     const body = record(node.fields.body);
     if (body !== null) targets.push({ fieldPrefix: "body.", fields: body, routingAllowed: false });
   }
@@ -626,24 +626,7 @@ export function validateSpec(
         "${scan.ids} or ${args.dump}",
       );
     }
-    for (const reference of refsIn(node.fields)) {
-      const rootId = reference.split(".", 1)[0];
-      if (
-        rootId !== undefined &&
-        isValidRef(reference) &&
-        !["args", "item", "stage", "winner", "round", "so_far"].includes(rootId) &&
-        !knownIds.has(rootId)
-      ) {
-        issue(
-          issues,
-          "ref_target",
-          `reference \${${reference}} points at unknown node '${rootId}'`,
-          node.id,
-          null,
-          "reference an existing node id",
-        );
-      }
-    }
+    validateRefTargets(node, knownIds, issues);
     checkNamedSchema(node.fields, node.id, "", schemas, issues);
     // #238 (unknown fields in sub-objects) reuses this same scan point —
     // schemaBearingSubObjects above already enumerates body/synthesize/stages.

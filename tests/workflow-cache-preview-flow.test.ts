@@ -178,6 +178,7 @@ async function resume(h: Harness, runId: string, args: Record<string, unknown>):
 interface Seen {
   readonly type: string;
   readonly data: Readonly<Record<string, unknown>>;
+  readonly identity: Readonly<Record<string, unknown>>;
 }
 
 function eventsOf(h: Harness, runId: string, nodeId: string, segmentId?: string): readonly Seen[] {
@@ -188,7 +189,7 @@ function eventsOf(h: Harness, runId: string, nodeId: string, segmentId?: string)
   });
   return page.events
     .filter((event) => (event.identity.node_path as readonly string[] | undefined)?.[0] === nodeId)
-    .map((event) => ({ type: event.event_type, data: event.data }));
+    .map((event) => ({ type: event.event_type, data: event.data, identity: event.identity }));
 }
 
 const ofType = (events: readonly Seen[], type: string): readonly Seen[] =>
@@ -389,9 +390,16 @@ describe("the ledger holds one leaf per round (#980)", () => {
         "loop.round",
         "loop.round",
       ]);
-      expect(started.map((event) => event.data.attempt)).toEqual([0, 1, 2]);
+      expect(started.map((event) => event.identity.attempt)).toEqual([0, 1, 2]);
       expect(ofType(events, "leaf.completed")).toHaveLength(3);
       expect(ofType(events, "cache.stored")).toHaveLength(3);
+      // The node already holds the earlier rounds' cells by the time a later round misses, which
+      // is all `identity_changed` means for a node with one cell per round (the skill says so).
+      expect(ofType(events, "cache.missed").map((event) => event.data.reason)).toEqual([
+        "never_completed",
+        "identity_changed",
+        "identity_changed",
+      ]);
       expect(ofType(events, "workflow.node").at(-1)?.data).toMatchObject({ state: "complete" });
     } finally {
       h.close();
@@ -428,7 +436,8 @@ describe("a resume continues from the round it stopped at (#980)", () => {
       expect(ofType(events, "cache.replayed")).toHaveLength(2);
       const started = ofType(events, "leaf.started");
       expect(started).toHaveLength(1);
-      expect(started[0]?.data).toMatchObject({ role: "loop.round", attempt: 2 });
+      expect(started[0]?.data).toMatchObject({ role: "loop.round" });
+      expect(started[0]?.identity.attempt).toBe(2);
       expect(ofType(events, "cache.stored")).toHaveLength(1);
     } finally {
       h.close();
