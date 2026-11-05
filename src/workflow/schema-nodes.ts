@@ -1,5 +1,7 @@
+import { CALL_TOOLS, isCallTool, MAX_CALL_TIMEOUT_SECONDS } from "./call-tools.js";
 import {
   ESCALATE_KIND,
+  MAX_CALL_ARGS,
   MAX_ESCALATE_SUMMARY,
   MAX_GATE_ATTEMPTS,
   MAX_LOOP_ROUNDS,
@@ -290,9 +292,54 @@ export function validateEscalate(node: Node, issues: SpecIssue[]): void {
   }
 }
 
-/** Stub of issue #982: the `call` node's validator lands in the green commit. */
-export function validateCall(_node: Node, _issues: SpecIssue[]): never {
-  throw new Error("not implemented: validateCall");
+/**
+ * `call` (#982): `tool` is one of `CALL_TOOLS`, the read-only tools the sandbox's policy
+ * (`fs_allow`/`egress_allow`) limits and that can be rerun without harm; `args` is an object of
+ * up to `MAX_CALL_ARGS` keys whose values may carry a `${ref}` (the refs are scanned by
+ * `schema.ts` like any node's); `timeout` may not pass `MAX_CALL_TIMEOUT_SECONDS`. That `timeout`
+ * is a positive number and `retries` a whole number from 0 to 3 are the knob rules `schema.ts`
+ * already applies to every node, so they are not said twice here. The node has no routing
+ * knobs (it spawns no model) and no `prompt`: `schema.ts` refuses both as unknown fields. A
+ * missing `tool` is `missing_field`, reported once by `schema.ts`.
+ */
+export function validateCall(node: Node, issues: SpecIssue[]): void {
+  if (node.type !== "call") return;
+  const { tool, args, timeout } = node.fields;
+  if (tool !== undefined && !(typeof tool === "string" && isCallTool(tool))) {
+    issue(
+      issues,
+      "field_value",
+      `'tool' must be one of ${CALL_TOOLS.join(", ")} — the read-only tools a workflow can call without a model (write_file, terminal, web_search and mcp tools are not allowed)`,
+      node.id,
+      "tool",
+      'tool: "web_fetch"',
+    );
+  }
+  const mapping = record(args);
+  if (args !== undefined && (mapping === null || Object.keys(mapping).length > MAX_CALL_ARGS)) {
+    issue(
+      issues,
+      "field_value",
+      `'args' must be an object of at most ${String(MAX_CALL_ARGS)} keys — the arguments the tool takes; a value may be a \${ref}`,
+      node.id,
+      "args",
+      'args: {url: "${args.url}"}',
+    );
+  }
+  if (
+    typeof timeout === "number" &&
+    Number.isFinite(timeout) &&
+    timeout > MAX_CALL_TIMEOUT_SECONDS
+  ) {
+    issue(
+      issues,
+      "field_value",
+      `'timeout' must be at most ${String(MAX_CALL_TIMEOUT_SECONDS)} seconds — a call always has a deadline`,
+      node.id,
+      "timeout",
+      "timeout: 30",
+    );
+  }
 }
 
 export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
@@ -300,6 +347,7 @@ export const NODE_VALIDATORS: ReadonlyMap<string, NodeValidator> = new Map([
   ["switch", validateSwitch],
   ["loop", validateLoop],
   ["escalate", validateEscalate],
+  ["call", validateCall],
 ]);
 
 /** Runs the validator of `node.type`, if that type has one. */

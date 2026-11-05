@@ -327,7 +327,7 @@ describe("a call that fails is retried until `retries`, and never when denied (#
     expect(result.faults).toEqual([
       "fetch: call web_fetch error after 3 attempts: could not fetch the page: boom",
     ]);
-    expect(result.status).toBe("degraded");
+    expect(result.status).toBe("failed");
     expect(cache.puts).toEqual([]);
   });
 
@@ -402,6 +402,48 @@ describe("a call that fails is retried until `retries`, and never when denied (#
     expect(result.faults[0]).toContain("call web_fetch error after 2 attempts");
     expect(result.faults[0]).toContain("not valid JSON");
   });
+
+  it.each(["null", "42", '"text"', "[1]"])(
+    "an ok that is JSON but not an object (%s) is a failed attempt, never a silent null",
+    async (output) => {
+      const runtime = new PortRuntime(() => ({ status: "ok", output }));
+      const cache = new RecordingCache();
+      const result = await run(runtime, one(), ARGS, { cache });
+      expect(result.outputs.fetch).toBeNull();
+      expect(result.faults).toEqual([
+        "fetch: call web_fetch error after 1 attempt: the tool's ok envelope is not a JSON object",
+      ]);
+      expect(cache.puts).toEqual([]);
+    },
+  );
+
+  it("never makes more than 4 attempts, whatever retries a node that skipped validation carries", async () => {
+    const runtime = new PortRuntime(() => failure("error", "boom"));
+    const workflow = new WorkflowSpec({
+      meta: { name: NAME },
+      inputs: {},
+      schemas: {},
+      nodes: [new Node("fetch", "call", { tool: "read_file", retries: 99 })],
+    });
+    const result = await run(runtime, workflow);
+    expect(runtime.calls).toHaveLength(4);
+    expect(result.faults).toEqual(["fetch: call read_file error after 4 attempts: boom"]);
+  });
+
+  it.each([-1, 1.5, "2", null])(
+    "a `retries` that is not a whole number from 0 up (%s) means no retry",
+    async (retries) => {
+      const runtime = new PortRuntime(() => failure("error", "boom"));
+      const workflow = new WorkflowSpec({
+        meta: { name: NAME },
+        inputs: {},
+        schemas: {},
+        nodes: [new Node("fetch", "call", { tool: "read_file", retries })],
+      });
+      await run(runtime, workflow);
+      expect(runtime.calls).toHaveLength(1);
+    },
+  );
 });
 
 describe("every attempt is charged to the run's limits, and no token is (#982)", () => {

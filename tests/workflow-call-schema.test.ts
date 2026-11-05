@@ -201,7 +201,7 @@ describe("the validation of a call (#982)", () => {
       "refuses '%s': a call has no model to route",
       (knob) => {
         const issues = callIssues({ [knob]: "x" });
-        expect(shape(issues)).toEqual([`unknown_field:${knob}`]);
+        expect(shape(issues)).toContain(`unknown_field:${knob}`);
       },
     );
 

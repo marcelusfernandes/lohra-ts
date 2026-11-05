@@ -106,6 +106,7 @@ export const NODE_SPECS: Readonly<Record<string, NodeSpec>> = Object.freeze({
   switch: spec(["value", "cases", "otherwise"], ["value", "cases"], true),
   loop: spec(["body", "until", "max_rounds"], ["body", "until", "max_rounds"], true),
   escalate: spec(["when", "kind", "summary"], ["when", "kind", "summary"]),
+  call: spec(["tool", "args", "timeout", "retries"], ["tool"]),
 });
 
 export const NODE_TYPES: ReadonlySet<string> = new Set(Object.keys(NODE_SPECS));

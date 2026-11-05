@@ -11,6 +11,7 @@ import {
   routingIdentity,
   strictResolve,
 } from "./engine-utils.js";
+import { runCall } from "./flow-call.js";
 import { runEscalate } from "./flow-escalate.js";
 import { runLoopUntil } from "./flow-loop.js";
 import { runSwitch } from "./flow-switch.js";
@@ -154,4 +155,5 @@ export const FLOW_STRATEGIES: Readonly<Record<string, FlowStrategy>> = Object.fr
   switch: runSwitch,
   loop: runLoopUntil,
   escalate: (deps, node, context) => Promise.resolve(runEscalate(deps, node, context)),
+  call: runCall,
 });
