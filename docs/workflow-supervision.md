@@ -402,6 +402,121 @@ pelo nome e vê como cada um se sai. A biblioteca é a mesma
   definição de "a mesma tarefa" e o roteamento dos casos comuns para um
   template continuam na exploração #949, que tem o placar como insumo.
 
+## Blocos de controle de fluxo: `call`, `switch`, `loop` e `escalate` (épico #976)
+
+Até o épico #976 todo workflow era um grafo fixo em que cada nó era um leaf de
+modelo. Desde ele (PRs #984, #985, #986, #988, #983, #990 e #989) o orquestrador
+monta, sem template, um workflow que escolhe um caminho pelo valor do estado,
+repete um passo até uma condição, pausa para uma pessoa só quando algo vale e lê
+um arquivo ou uma página sem gastar modelo. Ele aprende os quatro blocos na skill
+`workflow-flow-control` (`assets/skills/workflow-authoring/flow-control/SKILL.md`),
+que o `workflow-authoring` aponta; um teste prende os limites dela ao código.
+
+- **Predicados** (#984, `src/workflow/predicates.ts`): `loop.until` e `escalate.when`
+  decidem sem modelo: `{"gte": {"path": "${last.score}", "n": 8}}`. São nove:
+  `field_equals`, `field_true`, `in`, `gte`, `lt`, `count_gte`, `empty`, `field_type`
+  e `not`. `path` é **um único** `${ref}`, sem expressão, e os operandos são literais.
+  **Não há `and`/`or`**: para duas condições, o corpo calcula um campo e o predicado
+  o testa. Campo ausente ou de tipo errado não vale.
+- **`switch`** (#985): `value` (um `${ref}`), `cases` (2 a 16, cada um `null` ou um
+  corpo de agent com `prompt`) e `otherwise`. **Só o caso escolhido roda**, com um
+  leaf: os outros não existem em runtime (sem spawn, célula nem evento) e um `null`
+  não gasta nada. Sem caso e sem `otherwise` é fault. Saída: `{case, matched, output}`.
+- **`loop`** (#986): repete o `body` até o predicado `until` valer. `max_rounds` é
+  obrigatório, de 1 a 16, e é conferido contra os limites do run antes da rodada 0.
+  Saída: `{last, rounds, until_met}`. **O teto dá fault**: sem `until` valer em
+  `max_rounds` rodadas, `until_met` é `false`, `faults` traz `reached max_rounds`, o
+  run termina `degraded` e `last` é o melhor que saiu.
+- **`escalate`** (#988): `when` (predicado), `kind` (etiqueta curta) e `summary` (1 a
+  2000 caracteres, com `${ref}`); sem leaf e sem token. Se `when` vale, o run termina
+  `paused` com `pause_reason: "escalated"` (`lohra workflow list` mostra
+  `paused (escalated: <kind>)`), e a resposta vai por
+  `run_workflow(resume_run_id=..., checkpoint_answers={"<node_id>": <resposta>})`.
+  Não há `default`: uma retomada sem resposta é recusada. Os nós seguintes só esperam
+  se tiverem `depends_on` no `escalate`.
+  - **Falha fechado.** O run pausa, nunca segue, se o `when` não pode ser avaliado (o nó
+    que ele lê morreu) ou se o `summary` não renderiza: um nó feito para pôr uma pessoa
+    diante de uma decisão não a pula por causa de uma falha.
+- **`call`** (#983 e #990): roda `read_file` ou `web_fetch` sem modelo, pelo mesmo
+  sandbox do leaf. `args` tem até 16 chaves, `timeout` vai até 120 s (30 s sem ele) e
+  `retries` de 0 a 3. A saída é o envelope da tool (`${ler.data}`, `${pagina.text}`);
+  `data` é texto, e um `switch`, um predicado ou um `args` lê um campo dele se for JSON
+  (`${ler.data.mode}`), mas o prompt de um `agent` só pega o `${ler.data}` inteiro.
+  - **Custo de token é zero**: sem leaf. Cada tentativa gasta um lugar do limite de
+    spawns do run. `error` e `timeout` são retentados; **`denied` nunca**: o sandbox
+    respondeu antes de despachar, e perguntar de novo não muda a política. Esgotadas
+    as tentativas, o nó fica `null` e `faults` traz a causa. Com a célula guardada, a
+    retomada não chama a tool de novo.
+  - Ficam de fora `web_search` (a política não limita o destino), `write_file` (uma
+    retomada repetiria o efeito), `terminal` e `mcp_*`.
+  - **O taint é da sessão, não do run.** Depois de um `web_fetch` (de um leaf ou de um
+    `call`, em qualquer run da sessão), todo `read_file` e `web_fetch` seguinte é negado
+    (`tainted run: ... is disabled for leaves`): ponha os `read_file` antes e conte
+    com um `web_fetch` por sessão.
+
+### Exemplo real: do pedido ao run (dogfooding do épico, `main` em `1ad0226`)
+
+O pedido, resumido: na pasta atual há um `ticket.json`; monte um workflow sem template
+que o leia sem gastar modelo, escolha o caminho pela severidade, refine a resposta até
+nota 8 em no máximo 3 rodadas, pare para revisão se a severidade for alta e só então
+responda. O orquestrador (`gpt-6.1-sol`) construiu o spec sozinho, e o run parou `paused`:
+
+| Nó                  | Tipo                                         | O que aconteceu                              |
+| ------------------- | -------------------------------------------- | -------------------------------------------- |
+| `ler_ticket`        | `call` (`read_file`)                         | sem leaf e sem token                         |
+| `rotear_severidade` | `switch` sobre `${ler_ticket.data.severity}` | caso `high`, um leaf                         |
+| `refinar_resposta`  | `loop`, `until` nota ≥ 8, `max_rounds` 3     | `until` valeu na primeira rodada, com nota 9 |
+| `revisao_humana`    | `escalate`, `when` severidade = `high`       | run `paused` com `escalated`                 |
+| `resposta_final`    | `agent`, `depends_on` `revisao_humana`       | não rodou antes da revisão                   |
+
+Aprovada a resposta na mesma sessão, o orquestrador chamou `run_workflow` com
+`resume_run_id` e `checkpoint_answers: {revisao_humana: ...}`, e o run terminou
+`complete`, com 0 falhas. Os leaves rodaram em `gpt-6-luna`, o tier `execution` (abaixo).
+
+### Onde um workflow lê: a pasta de trabalho do run e `fs_allow`
+
+O `read_file` de um `call` passa pelo sandbox do leaf, que só abre a pasta de trabalho
+do run (`<home>/runs/<run_id>/work-<n>`) e as pastas de `fs_allow` em
+`<home>/workflow_policy.json` (`<home>` é o `LOHRA_HOME`: `~/.lohra`, ou
+`%LOCALAPPDATA%\lohra` no Windows). Qualquer outra pasta, como a em que você abriu o
+`chat`, é negada (`path is outside the workflow working scope`), e sem o arquivo, ou com
+JSON inválido, a política nega tudo. No dogfooding, o `call` foi negado assim, e o
+`escalate` que lia o nó pausou o run em vez de seguir.
+
+```json
+{ "fs_allow": [{ "path": "~/tickets", "mode": "ro" }] }
+```
+
+`fs_allow` aceita um caminho (leitura e escrita) ou `{path, mode}` com `"ro"` ou `"rw"`;
+um `call` só lê, então `"ro"` basta. `egress_allow` é a lista de hosts do `web_fetch`
+(`["example.com"]`), por igualdade. A política é lida a cada launch e a cada resume.
+
+### Orquestrador médio, execução leve: `workflow_tiers.json` e `execution` (#989)
+
+Um nó de workflow sem `model` nem `tier`, e um sub-agente de `delegate_task` ou
+`spawn_session` sem `model`, rodam no modelo do orquestrador. `"execution": "<tier>"`
+em `<home>/workflow_tiers.json` troca esse padrão por um tier do arquivo. Exemplo da assinatura:
+
+```json
+{
+  "small": "gpt-6-luna",
+  "medium": "gpt-6.1-sol",
+  "big": "gpt-6-astra",
+  "execution": "small"
+}
+```
+
+- **O orquestrador não vem desse arquivo.** Na assinatura Codex é o `--model` ou, sem
+  ele, o `model` de `~/.codex/config.toml` (`readCodexModel`, `src/auth/codex.ts`): para
+  ficar no tier médio, ponha `model = "gpt-6.1-sol"` lá. `medium` e `big` valem para o
+  nó que pede `tier: "medium"` ou `"big"`.
+- Um `model` ou `tier` explícito no nó (ou na tarefa) vence o `execution`. Sem a chave,
+  nada muda, nem a identidade de cache; com ela, trocar o tier refaz os nós sem rota num
+  resume. O arquivo é lido a cada launch e spawn, e `lohra tiers list` mostra o `execution`.
+- `execution` tem de nomear um tier definido no arquivo; senão é um `TiersError`
+  nomeado, e o launch ou o sub-agente falha em vez de cair no modelo do orquestrador.
+  O `route` de um pivô depois de `route_fault` não reescreve um nó que roda pelo `execution`.
+
 ## Manifesto de artefatos: `artifacts`/`artifact_faults` por run (#463, M11-S5)
 
 Todo `write_file` que uma folha de qualquer nó do run realmente executa com
