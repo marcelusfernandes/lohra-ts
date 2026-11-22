@@ -26,7 +26,9 @@ On the macOS and Linux runners that `pack-check` covers, `better-sqlite3` and `n
 
 ## First session
 
-On a TTY, `lohra init` asks which provider to use. Terminal answers are hidden: the prompt says so, and Ctrl+C or EOF stops setup without claiming it finished. If that provider needs a key that is not set, init asks for it. If a key is already set, it asks for a default model. It may also offer to copy the legacy `use-lohra` kit into harness directories it already sees. That is not the client installer below.
+On a TTY, `lohra init` asks two separate questions and writes nothing until both are answered. First, mark any of Claude (Anthropic API key), Codex (subscription), and OpenRouter. If OpenRouter needs a key, the next prompt is the hidden `OPENROUTER_API_KEY`. If Claude needs a key, the prompt after that is the hidden `ANTHROPIC_API_KEY`. Existing keys stay in place and are not printed. Codex reuses the current subscription consent and does not start a login. Without a valid local login, Codex stays pending and cannot be the default. You then pick one usable provider as the default. An Anthropic API default ends as `lohra auth prefer api_key` even when Codex is also enabled. A Codex default requires that subscription consent.
+
+The second question marks skill clients (Claude Code, Codex, OpenCode, and Pi) with the same keyboard selector. Terminal answers are hidden. Ctrl+C or EOF stops setup and writes nothing. A save or install failure is reported and does not write the init success marker.
 
 `lohra init --no-input`, or a run whose stdin is not a terminal, only prints the report and writes nothing.
 
@@ -95,7 +97,7 @@ lohra skills add OpenCode
 lohra skills add Pi
 ```
 
-`Claude` is accepted. Names are case-insensitive. Paths, updates, and removal: [docs/skills-management.md](docs/skills-management.md). `lohra init` does not yet pick those clients from a keyboard list.
+`Claude` is accepted. Names are case-insensitive. Paths, updates, and removal: [docs/skills-management.md](docs/skills-management.md). `lohra init` asks for those clients with the keyboard after the provider step.
 
 MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard` starts. A missing file is ignored. A malformed file fails closed.
 
@@ -108,7 +110,6 @@ MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard
 - **Windows as a supported platform.** Milestone 25 hardening is in progress. The `windows-checks` job is informative (`continue-on-error`). This release does not make it required.
 - **A terminal UI.** The Ink TUI is not shipped (milestone 23 is still the open investigation). `dashboard` is the local gateway, not that UI.
 - **Automatic template promotion or a learning loop.** A template is written only when `workflow_save` is asked to keep a completed run.
-- **Keyboard client selection and an explicit default provider inside `init`.** Those are #938 and #939, left for 0.1.1. `lohra skills add` is what installs the kit today.
 
 ## More
 

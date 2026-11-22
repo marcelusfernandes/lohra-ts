@@ -47,6 +47,7 @@ import {
   writeMarker,
   type OnboardingSnapshot,
 } from "../src/onboarding/wizard.js";
+import type { InitProviderId } from "../src/onboarding/provider-selection.js";
 import { listSkillClients, type SkillClient } from "../src/skills/clients.js";
 import { readExportable } from "../src/skills/export.js";
 import { ManagedInstallError, manageSkillInstallation } from "../src/skills/managed-install.js";
@@ -198,22 +199,21 @@ describe("wizard", () => {
     expect(output).toContain("provider [anthropic]: ");
   });
 
-  it("writes a partial env and marker when injected credential input is blank", async () => {
+  it("does not persist a provider when the Anthropic key is skipped", async () => {
     const base = root();
     const home = join(base, "profile");
-    const answers = ["anthropic"];
     let err = "";
     let out = "";
-    const environment: Record<string, string> = {};
     const result = await runInit({
       snapshot: snapshot(home),
       base,
       home,
-      environment,
+      codexHome: join(base, "codex"),
+      environment: {},
       noInput: false,
       isTty: true,
       prompter: new Prompter(
-        () => answers.shift() ?? "",
+        () => "",
         (text) => {
           err += text;
         },
@@ -221,13 +221,17 @@ describe("wizard", () => {
       writeOut: (text) => {
         out += text;
       },
+      chooseProviders: () => Promise.resolve(["anthropic"]),
+      chooseDefault: () => Promise.reject(new Error("skipped key is not a default")),
       chooseClients: () => Promise.resolve([]),
     });
     expect(result).toBe(0);
-    expect(readFileSync(join(base, ".env"), "utf8")).toBe("LOHRA_PROVIDER=anthropic\n");
+    expect(existsSync(join(base, ".env"))).toBe(false);
+    expect(existsSync(join(home, "auth.json"))).toBe(false);
     expect(markerPresent(home)).toBe(true);
-    expect(out).toContain("provider anthropic is selected, but ANTHROPIC_API_KEY is not set.");
-    expect(err).toContain("ANTHROPIC_API_KEY (paste it, or Enter to skip) [skip]: ");
+    expect(out).toContain("not ready — no usable default was chosen.");
+    expect(out).not.toContain("ready — provider anthropic");
+    expect(err).toContain("ANTHROPIC_API_KEY (hidden, paste it, or Enter to skip) [skip]: ");
   });
 
   it("never prints a python line — the runtime does not embed or call Python (issue #696)", async () => {
@@ -238,6 +242,7 @@ describe("wizard", () => {
       snapshot: snapshot(home),
       base,
       home,
+      codexHome: join(base, "codex"),
       environment: {},
       noInput: true,
       isTty: false,
@@ -248,6 +253,8 @@ describe("wizard", () => {
       writeOut: (text) => {
         out += text;
       },
+      chooseProviders: () => Promise.reject(new Error("read during read-only init")),
+      chooseDefault: () => Promise.reject(new Error("read during read-only init")),
       chooseClients: () => Promise.resolve([]),
     });
     expect(result).toBe(0);
@@ -402,7 +409,7 @@ describe("init client selection", () => {
   it("collects the selection before writing and installs only those destinations", async () => {
     const base = root();
     const home = join(base, "profile");
-    const answers = ["anthropic", ""];
+    const key = "fixture-anthropic-key-939";
     let sawSelection = false;
     const clients = catalog(base);
     const result = await runInit({
@@ -418,21 +425,35 @@ describe("init client selection", () => {
       }),
       base,
       home,
+      codexHome: join(base, "codex"),
       environment: { HOME: base },
       noInput: false,
       isTty: true,
       prompter: new Prompter(
-        () => answers.shift() ?? "",
+        () => key,
         (text) => {
           if (text.includes("export the use-lohra kit")) {
             throw new Error("legacy collective export is still offered");
           }
         },
       ),
-      writeOut: () => undefined,
+      writeOut: (text) => {
+        expect(text).not.toContain(key);
+      },
+      chooseProviders: () => {
+        expect(existsSync(join(base, ".env"))).toBe(false);
+        expect(existsSync(join(home, "auth.json"))).toBe(false);
+        return Promise.resolve(["anthropic"]);
+      },
+      chooseDefault: (usable) => {
+        expect(existsSync(join(base, ".env"))).toBe(false);
+        expect(usable).toEqual(["anthropic"]);
+        return Promise.resolve("anthropic");
+      },
       chooseClients: (offered) => {
         expect(existsSync(join(base, ".env"))).toBe(false);
         expect(markerPresent(home)).toBe(false);
+        expect(existsSync(join(home, "auth.json"))).toBe(false);
         expect(offered.map((client) => client.name)).toEqual([
           "Claude Code",
           "Codex",
@@ -445,7 +466,9 @@ describe("init client selection", () => {
     });
     expect(sawSelection).toBe(true);
     expect(result).toBe(0);
-    expect(readFileSync(join(base, ".env"), "utf8")).toBe("LOHRA_PROVIDER=anthropic\n");
+    expect(readFileSync(join(base, ".env"), "utf8")).toBe(
+      `ANTHROPIC_API_KEY=${key}\nLOHRA_PROVIDER=anthropic\n`,
+    );
     expect(markerPresent(home)).toBe(true);
     expect(existsSync(join(base, ".agents", "skills", "use-lohra-ts", "SKILL.md"))).toBe(true);
     expect(existsSync(join(base, ".claude", "skills", "use-lohra-ts"))).toBe(false);
@@ -460,21 +483,25 @@ describe("init client selection", () => {
       snapshot: snapshot(home),
       base,
       home,
+      codexHome: join(base, "codex"),
       environment: { HOME: base },
       noInput: false,
       isTty: true,
       prompter: new Prompter(
-        () => "anthropic",
+        () => "fixture-anthropic-key-939",
         () => undefined,
       ),
       writeOut: () => undefined,
+      chooseProviders: () => Promise.resolve(["anthropic"] as InitProviderId[]),
+      chooseDefault: () => Promise.resolve("anthropic" as InitProviderId),
     };
     await expect(
       runInit({
         ...common,
-        chooseClients: () => {
+        chooseDefault: () => {
           throw new TerminalInputError("terminal input ended (EOF); configuration interrupted");
         },
+        chooseClients: () => Promise.resolve([]),
       }),
     ).rejects.toBeInstanceOf(TerminalInputError);
     expect(existsSync(join(base, ".env"))).toBe(false);
@@ -504,6 +531,7 @@ describe("init client selection", () => {
         snapshot: snapshot(base),
         base,
         home: base,
+        codexHome: join(base, "codex"),
         environment: { HOME: base },
         ...gate,
         prompter: new Prompter(
@@ -513,6 +541,14 @@ describe("init client selection", () => {
           () => undefined,
         ),
         writeOut: () => undefined,
+        chooseProviders: () => {
+          calls += 1;
+          return Promise.resolve([]);
+        },
+        chooseDefault: () => {
+          calls += 1;
+          return Promise.resolve("anthropic");
+        },
         chooseClients: () => {
           calls += 1;
           return Promise.resolve([]);

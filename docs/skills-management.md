@@ -1,8 +1,9 @@
 # Gerenciar skills do Lohra nos clientes
 
-No `lohra init` interativo, marque os clientes com o teclado antes de qualquer
-gravação (a seção [Seleção no init](#seleção-no-lohra-init)). Depois, ou no
-lugar disso, instale o kit TypeScript no cliente desejado:
+No `lohra init` interativo há dois passos, independentes, antes de qualquer
+gravação (a seção [Seleção no init](#seleção-no-lohra-init)): provedores e, em
+seguida, clientes. Depois, ou no lugar do segundo passo, instale o kit
+TypeScript no cliente desejado:
 
 ```bash
 lohra skills add OpenCode
@@ -24,15 +25,45 @@ antes de escrever arquivos; sucesso e operações sem mudança retornam 0.
 
 ## Seleção no `lohra init`
 
-O init interativo mantém as perguntas atuais de provedor, chave e modelo.
-Em seguida oferece Claude Code, Codex, OpenCode e Pi, mesmo que os
-executáveis não estejam no PATH. As setas movem o cursor, Espaço marca ou
-desmarca e Enter confirma. Os quatro podem ser marcados juntos, alguns, ou
-nenhum.
+Os dois passos usam o mesmo seletor de teclado: as setas movem o cursor,
+Espaço marca ou desmarca e Enter confirma. Nada é gravado (`.env`, arquivos
+de autenticação, marcador de init ou skills) até as duas respostas
+terminarem. Ctrl+C ou EOF no meio das perguntas não grava configuração
+parcial. Falha ao salvar ou ao instalar é explícita e não escreve o marcador
+de sucesso. `--no-input` e um terminal que não é TTY continuam somente
+leitura: não perguntam e não instalam. A entrada da chave é oculta, sem eco,
+e nenhuma chave, token ou `account_id` aparece na saída. O modo raw e os
+listeners do terminal voltam ao estado anterior ao terminar ou ao interromper.
+O init não chama modelos para concluir.
 
-A seleção termina antes de gravar `.env`, o marcador de init ou qualquer
-skill. Só os destinos marcados recebem `use-lohra-ts`, pelo catálogo e pelo
-gestor de `lohra skills add`: instalação nova, atualização de uma cópia
+### Provedores
+
+O primeiro passo oferece Claude (API Anthropic), Codex (assinatura) e
+OpenRouter. Vários podem ser marcados. Essa escolha não instala skills e não
+escolhe Claude Code, Codex, OpenCode ou Pi.
+
+Se OpenRouter estiver marcado e ainda não houver chave, a pergunta seguinte
+pede `OPENROUTER_API_KEY`. Se Claude precisar de chave, a pergunta depois
+dessa pede `ANTHROPIC_API_KEY`. Chaves já presentes são preservadas e não são
+pedidas de novo. Ter uma chave gravada não é autenticação remota validada; o
+relatório diz que a chave ficou só no disco.
+
+Codex reutiliza o consentimento que `lohra auth enable` já usa. Sem um login
+local válido, o init explica `lohra auth login` ou `codex login`, deixa Codex
+pendente e não o oferece como padrão. Não inicia OAuth nem login. As outras
+opções continuam disponíveis.
+
+O padrão é uma escolha explícita entre as opções utilizáveis. Padrão na API
+Anthropic termina em `prefer api_key` mesmo com Codex habilitado. Padrão
+Codex exige a assinatura com consentimento e termina em `prefer subscription`.
+O texto final descreve o que foi de fato gravado.
+
+### Clientes de skills
+
+Em seguida o init oferece Claude Code, Codex, OpenCode e Pi, mesmo que os
+executáveis não estejam no PATH. Os quatro podem ser marcados juntos, alguns,
+ou nenhum. Só os destinos marcados recebem `use-lohra-ts`, pelo catálogo e
+pelo gestor de `lohra skills add`: instalação nova, atualização de uma cópia
 gerenciada intacta, ou manutenção quando o conteúdo já é o kit atual. Edições
 locais e arquivos extras permanecem. Um conflito naquele destino é falha
 daquele cliente, com o caminho do destino, e não é anunciado como instalação
@@ -40,12 +71,6 @@ concluída. Os outros clientes marcados ainda são tentados.
 
 Desmarcar não apaga uma instalação. Para remover uma cópia gerenciada, use
 `lohra skills remove`.
-
-Cancelar (Ctrl+C) ou EOF durante as perguntas não grava configuração.
-`--no-input` e um terminal que não é TTY continuam somente leitura: não
-perguntam e não instalam. A entrada da chave continua oculta, sem eco. O modo
-raw e os listeners do terminal voltam ao estado anterior ao terminar ou ao
-interromper.
 
 OpenCode e Pi também descobrem diretórios compartilhados. Quando um deles é
 escolhido, o init lista essas outras fontes e lembra que uma cópia ali pode
