@@ -4,7 +4,23 @@ import { join } from "node:path";
 import { getProviderProfile } from "../providers/registry.js";
 import { listSkillClients, type SkillClient } from "../skills/clients.js";
 import { installSelectedClients } from "./client-selection.js";
-import { upsertEnvFile } from "./env-write.js";
+import {
+  assertUsableDefault,
+  codexAlreadyEnabled,
+  codexConsentIntro,
+  codexStatusText,
+  CODEX_CONSENT_PROMPT,
+  configuredModel,
+  keysToAsk,
+  keyPrompt,
+  normalizeProviders,
+  persistProviderPlan,
+  readCodexLogin,
+  redactSecrets,
+  renderProviderResult,
+  usableProviderIds,
+  type InitProviderId,
+} from "./provider-selection.js";
 
 export const MARKER_NAME = ".initialized";
 export const MARKER_TEXT = "onboarding offered — re-run `lohra init` any time.\n";
@@ -231,39 +247,41 @@ export async function runConfigure(options: {
   readonly snapshot: OnboardingSnapshot;
   readonly prompter: Prompter;
   readonly base: string;
+  readonly home: string;
+  readonly codexHome: string;
   readonly environment: Record<string, string>;
   readonly writeOut: (text: string) => void;
+  readonly chooseProviders: () => Promise<readonly InitProviderId[]>;
+  readonly chooseDefault: (usable: readonly InitProviderId[]) => Promise<InitProviderId>;
   readonly chooseClients: (clients: readonly SkillClient[]) => Promise<readonly SkillClient[]>;
 }): Promise<number> {
-  const updates: Record<string, string> = {};
-  const suggested =
-    options.snapshot.detectedProvider || (options.snapshot.ollama.alive ? "ollama" : "");
-  let chosen = await options.prompter.ask(
-    `provider (${options.snapshot.providerNames.join("/")})`,
-    suggested,
-  );
-  if (chosen && !options.snapshot.providerNames.includes(chosen)) {
-    options.prompter.note(`  unknown provider '${chosen}' — keeping ${suggested || "none"}.`);
-    chosen = suggested;
+  const selected = normalizeProviders(await options.chooseProviders());
+  const keys: Record<string, string> = {};
+  for (const variable of keysToAsk(selected, options.environment)) {
+    const value = (await options.prompter.ask(keyPrompt(variable))).trim();
+    if (value) keys[variable] = value;
   }
-  if (chosen && chosen !== options.snapshot.detectedProvider) updates.LOHRA_PROVIDER = chosen;
-  const profile = chosen ? getProviderProfile(chosen) : null;
-  if (
-    profile !== null &&
-    profile.requiresApiKey &&
-    !profile.envVars.some((name) => options.environment[name])
-  ) {
-    const variable = profile.envVars[0] as string;
-    const key = await options.prompter.ask(`${variable} (paste it, or Enter to skip)`);
-    if (key) updates[variable] = key;
-  } else if (profile !== null) {
-    const current =
-      (options.environment.LOHRA_MODEL ?? "").trim() || profile.fallbackModels[0] || "";
-    const suggestedModel =
-      current || (chosen === "ollama" ? (options.snapshot.ollama.models[0] ?? "") : "");
-    const model = await options.prompter.ask("default model", suggestedModel);
-    if (model && model !== current) updates.LOHRA_MODEL = model;
+  const alreadyEnabled = codexAlreadyEnabled(options.home);
+  let codexConsent = false;
+  const login = readCodexLogin(options.home, options.codexHome);
+  if (selected.includes("codex")) {
+    if (alreadyEnabled) options.prompter.note(codexConsentIntro(true));
+    else {
+      options.prompter.note(codexConsentIntro(false));
+      codexConsent = await options.prompter.confirm(CODEX_CONSENT_PROMPT, false);
+    }
+    options.prompter.note(codexStatusText({ enabled: alreadyEnabled || codexConsent, login }));
   }
+  const draft = { ...options.environment, ...keys };
+  const usable = usableProviderIds({
+    selected,
+    anthropicKey: Boolean((draft.ANTHROPIC_API_KEY ?? "").trim()),
+    openrouterKey: Boolean((draft.OPENROUTER_API_KEY ?? "").trim()),
+    codexEnabled: alreadyEnabled || codexConsent,
+    loginUsable: login.usable,
+  });
+  const defaultProvider =
+    usable.length === 0 ? null : assertUsableDefault(await options.chooseDefault(usable), usable);
   const catalog = listSkillClients(options.environment);
   const picked = await options.chooseClients(catalog);
   for (const client of picked) {
@@ -274,25 +292,60 @@ export async function runConfigure(options: {
     }
   }
   const pickedIds = new Set(picked.map((client) => client.id));
-  const selected = catalog.filter((client) => pickedIds.has(client.id));
-  if (Object.keys(updates).length) upsertEnvFile(join(options.base, ".env"), updates);
-  Object.assign(options.environment, updates);
-  const failures = installSelectedClients(selected, (line) => {
+  const clients = catalog.filter((client) => pickedIds.has(client.id));
+  let persisted: ReturnType<typeof persistProviderPlan>;
+  try {
+    persisted = persistProviderPlan({
+      base: options.base,
+      home: options.home,
+      environment: options.environment,
+      plan: { selected, keys, codexConsent, defaultProvider },
+      subscriptionAlreadyActive: alreadyEnabled,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    options.prompter.note(
+      `failed to save init configuration: ${redactSecrets(message, Object.values(keys))}`,
+    );
+    return 2;
+  }
+  const failures = installSelectedClients(clients, (line) => {
     options.prompter.note(line);
   });
-  options.writeOut(`${evaluateOnboarding(options.snapshot, options.environment)[1]}\n`);
-  return failures;
+  const model =
+    defaultProvider === "anthropic" || defaultProvider === "openrouter"
+      ? configuredModel(defaultProvider, options.environment)
+      : "";
+  options.writeOut(
+    `${renderProviderResult({
+      selected,
+      defaultProvider,
+      persisted,
+      keysPresent: {
+        anthropic: Boolean((options.environment.ANTHROPIC_API_KEY ?? "").trim()),
+        openrouter: Boolean((options.environment.OPENROUTER_API_KEY ?? "").trim()),
+      },
+      login: readCodexLogin(options.home, options.codexHome),
+      codexEnabled: codexAlreadyEnabled(options.home),
+      model,
+      installFailures: failures,
+    })}\n`,
+  );
+  return failures > 0 ? 2 : 0;
 }
 
 export async function runInit(options: {
   readonly snapshot: OnboardingSnapshot;
   readonly base: string;
   readonly home: string;
+  readonly codexHome: string;
   readonly environment: Record<string, string>;
   readonly noInput: boolean;
   readonly isTty: boolean;
   readonly prompter: Prompter;
   readonly writeOut: (text: string) => void;
+  readonly chooseProviders: () => Promise<readonly InitProviderId[]>;
+  readonly chooseDefault: (usable: readonly InitProviderId[]) => Promise<InitProviderId>;
   readonly chooseClients: (clients: readonly SkillClient[]) => Promise<readonly SkillClient[]>;
 }): Promise<number> {
   options.writeOut(renderOnboardingReport(options.snapshot));
@@ -301,6 +354,11 @@ export async function runInit(options: {
     return 0;
   }
   const failures = await runConfigure(options);
-  writeMarker(options.home);
-  return failures > 0 ? 2 : 0;
+  if (failures > 0) return 2;
+  const path = writeMarker(options.home);
+  if (!markerPresent(options.home)) {
+    options.prompter.note(`failed to write the init marker at ${path}`);
+    return 2;
+  }
+  return 0;
 }

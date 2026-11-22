@@ -26,6 +26,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function selectorRepaint(text: string): boolean {
+  if (text.charCodeAt(0) !== 0x1b || text[1] !== "[") return false;
+  let index = 2;
+  const digit = text[index];
+  if (digit === undefined || digit < "0" || digit > "9") return false;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === undefined || char < "0" || char > "9") break;
+    index += 1;
+  }
+  return text[index] === "A";
+}
+
 function fixture(answers: string[], tty = true) {
   const base = mkdtempSync(join(tmpdir(), "lohra-terminal-"));
   process.env = { HOME: base, LOHRA_HOME: base, CODEX_HOME: join(base, "codex"), PATH: "" };
@@ -38,7 +51,6 @@ function fixture(answers: string[], tty = true) {
   vi.spyOn(process.stdin, "pause").mockReturnValue(process.stdin);
   let out = "";
   let err = "";
-  let fedSelector = false;
   vi.spyOn(process.stdout, "write").mockImplementation((value) => {
     out += String(value);
     return true;
@@ -49,11 +61,9 @@ function fixture(answers: string[], tty = true) {
     const feed = (answer: string): void => {
       queueMicrotask(() => process.stdin.emit("data", Buffer.from(answer)));
     };
-    if (text.endsWith(": ") && answers.length) feed(answers.shift() as string);
-    else if (!fedSelector && text.includes("Space toggles") && answers.length) {
-      fedSelector = true;
-      feed(answers.shift() as string);
-    }
+    const selector = text.includes("arrows move") && !selectorRepaint(text);
+    if (selector && answers.length) feed(answers.shift() as string);
+    else if (text.endsWith(": ") && answers.length) feed(answers.shift() as string);
     return true;
   });
   return {
@@ -71,13 +81,17 @@ function fixture(answers: string[], tty = true) {
 }
 
 describe("init terminal wiring", () => {
-  it("persists a model through the existing writer with an already configured provider", async () => {
-    const f = fixture(["openai\r", "fixture-model\r", "\r"]);
-    process.env.OPENAI_API_KEY = "fixture-not-a-key";
+  it("persists an explicit OpenRouter default without printing the existing key", async () => {
+    const f = fixture(["\x1b[B\x1b[B \r", "\r", "\r"]);
+    process.env.OPENROUTER_API_KEY = "fixture-not-a-key";
     try {
       expect(await runCli(["init"])).toBe(0);
-      expect(readFileSync(join(f.base, ".env"), "utf8")).toContain("LOHRA_MODEL=fixture-model");
+      const saved = readFileSync(join(f.base, ".env"), "utf8");
+      expect(saved).toContain("LOHRA_PROVIDER=openrouter");
+      expect(saved).not.toContain("fixture-not-a-key");
       expect(f.output().includes("fixture-not-a-key")).toBe(false);
+      expect(f.output()).not.toContain("default model");
+      expect(f.output()).toContain("remote authentication was not checked");
     } finally {
       f.restore();
     }
@@ -93,12 +107,12 @@ describe("init terminal wiring", () => {
     }
   });
   it("default runCli consumes stream answers through the existing protected writer", async () => {
-    const f = fixture(["openai\r", "fixture-not-a-key\r", "\r"]);
+    const f = fixture(["\x1b[B\x1b[B \r", "fixture-not-a-key\r", "\r", "\r"]);
     try {
       expect(await runCli(["init"])).toBe(0);
       const saved = readFileSync(join(f.base, ".env"), "utf8");
-      expect(saved.includes("LOHRA_PROVIDER=openai")).toBe(true);
-      expect(saved.includes("OPENAI_API_KEY=fixture-not-a-key")).toBe(true);
+      expect(saved.includes("LOHRA_PROVIDER=openrouter")).toBe(true);
+      expect(saved.includes("OPENROUTER_API_KEY=fixture-not-a-key")).toBe(true);
       expect(f.output().includes("fixture-not-a-key")).toBe(false);
       expect(f.raw.mock.calls.map((call) => call[0])).toEqual([true, false]);
       expect(process.stdin.listenerCount("data")).toBe(0);
@@ -109,7 +123,7 @@ describe("init terminal wiring", () => {
   it.each(["\u0003", "\u0004", "\u001a", "fixture-not-a-key\r\u0003"])(
     "fails before persistence when a key prompt is interrupted",
     async (control) => {
-      const f = fixture(["openai\r", control]);
+      const f = fixture(["\x1b[B\x1b[B \r", control]);
       try {
         expect(await runCli(["init"])).toBe(2);
         expect(existsSync(join(f.base, ".env"))).toBe(false);
@@ -136,7 +150,7 @@ describe("init terminal wiring", () => {
   it("preserves synchronous injected readers and accepts async ones", async () => {
     const f = fixture([]);
     try {
-      const answers = ["openai", "fixture-not-a-key"];
+      const answers = ["openrouter", "fixture-not-a-key", "openrouter", ""];
       expect(
         await runCli(["init"], {
           environment: { ...process.env } as Record<string, string>,
@@ -147,6 +161,9 @@ describe("init terminal wiring", () => {
           probeOllama: () => Promise.resolve(false),
         }),
       ).toBe(0);
+      expect(readFileSync(join(f.base, ".env"), "utf8")).toContain(
+        "OPENROUTER_API_KEY=fixture-not-a-key",
+      );
       expect(
         await new Prompter(
           () => Promise.resolve("yes"),
@@ -168,7 +185,7 @@ describe("init terminal wiring", () => {
   });
 
   it("offers all four clients without executables and installs only the toggled ones", async () => {
-    const f = fixture(["openai\r", "\r", "\x1b[B \r"]);
+    const f = fixture(["\r", "\x1b[B \r"]);
     const beforeSignals = process.listenerCount("SIGINT");
     try {
       expect(await runCli(["init"])).toBe(0);
@@ -192,7 +209,7 @@ describe("init terminal wiring", () => {
   });
 
   it("installs every selected client from the keyboard", async () => {
-    const f = fixture(["openai\r", "\r", " \x1b[B \x1b[B \x1b[B \r"]);
+    const f = fixture(["\r", " \x1b[B \x1b[B \x1b[B \r"]);
     try {
       expect(await runCli(["init"])).toBe(0);
       for (const file of [
@@ -212,7 +229,7 @@ describe("init terminal wiring", () => {
   });
 
   it("leaves an unchecked install in place", async () => {
-    const f = fixture(["openai\r", "\r", "\x1b[B\x1b[B\x1b[B \r"]);
+    const f = fixture(["\r", "\x1b[B\x1b[B\x1b[B \r"]);
     const claude = join(f.base, ".claude", "skills");
     manageSkillInstallation({ action: "add", skillsDirectory: claude });
     const before = readFileSync(join(claude, "use-lohra-ts", "SKILL.md"), "utf8");
@@ -230,7 +247,7 @@ describe("init terminal wiring", () => {
   });
 
   it("reports an install failure with its destination and still installs the others", async () => {
-    const f = fixture(["openai\r", "\r", " \x1b[B\x1b[B \r"]);
+    const f = fixture(["\x1b[B\x1b[B \r", "fixture-not-a-key\r", "\r", " \x1b[B\x1b[B \r"]);
     const edited = join(f.base, ".config", "opencode", "skills", "use-lohra-ts", "SKILL.md");
     mkdirSync(join(f.base, ".config", "opencode", "skills", "use-lohra-ts"), { recursive: true });
     writeFileSync(edited, "local edit");
@@ -239,6 +256,8 @@ describe("init terminal wiring", () => {
       expect(readFileSync(edited, "utf8")).toBe("local edit");
       expect(existsSync(join(f.base, ".claude", "skills", "use-lohra-ts", "SKILL.md"))).toBe(true);
       expect(existsSync(join(f.base, ".env"))).toBe(true);
+      expect(existsSync(join(f.base, ".initialized"))).toBe(false);
+      expect(f.output().includes("fixture-not-a-key")).toBe(false);
       const output = f.output();
       expect(output).toContain(
         `failed to install use-lohra-ts for OpenCode at ${join(f.base, ".config", "opencode", "skills", "use-lohra-ts")}`,
@@ -253,7 +272,7 @@ describe("init terminal wiring", () => {
   });
 
   it.each(["\u0003", "\u0004"])("cancels the client selector before any write", async (control) => {
-    const f = fixture(["openai\r", "\r", control]);
+    const f = fixture(["\r", control]);
     try {
       expect(await runCli(["init"])).toBe(2);
       expect(existsSync(join(f.base, ".env"))).toBe(false);
@@ -269,13 +288,41 @@ describe("init terminal wiring", () => {
   });
 
   it("confirms an empty selection without installing", async () => {
-    const f = fixture(["openai\r", "\r", "\r"]);
+    const f = fixture(["\r", "\r"]);
     try {
       expect(await runCli(["init"])).toBe(0);
       expect(f.output()).toContain("no clients selected");
+      expect(f.output()).toContain("no providers selected");
       expect(f.output()).toContain("lohra skills remove");
       expect(existsSync(join(f.base, ".claude", "skills", "use-lohra-ts"))).toBe(false);
-      expect(existsSync(join(f.base, ".env"))).toBe(true);
+      expect(existsSync(join(f.base, ".env"))).toBe(false);
+      expect(existsSync(join(f.base, ".initialized"))).toBe(true);
+    } finally {
+      f.restore();
+    }
+  });
+
+  it("asks for OpenRouter before Anthropic and does not call a model", async () => {
+    const key = "fixture-not-a-key";
+    const f = fixture([" \x1b[B \x1b[B \r", `${key}\r`, `${key}\r`, "n\r", "\r", "\r"]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      expect(await runCli(["init"])).toBe(0);
+      const output = f.output();
+      const openrouter = output.indexOf("OPENROUTER_API_KEY (hidden");
+      const anthropic = output.indexOf("ANTHROPIC_API_KEY (hidden");
+      const consent = output.indexOf("Enable Codex subscription mode anyway?");
+      const clients = output.indexOf("clients — arrows move");
+      expect(openrouter).toBeGreaterThan(-1);
+      expect(anthropic).toBeGreaterThan(openrouter);
+      expect(consent).toBeGreaterThan(anthropic);
+      expect(clients).toBeGreaterThan(consent);
+      expect(output).toContain("Codex (subscription) was not enabled");
+      expect(output).not.toContain("Waiting for authorization");
+      expect(output.includes(key)).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(readFileSync(join(f.base, ".env"), "utf8")).toContain("LOHRA_PROVIDER=anthropic");
+      expect(existsSync(join(f.base, "auth.json"))).toBe(false);
     } finally {
       f.restore();
     }

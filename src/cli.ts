@@ -34,6 +34,7 @@ import {
   CLIENT_SELECTION_TITLE,
   clientsFromLine,
 } from "./onboarding/client-selection.js";
+import { promptInitDefault, promptInitProviders } from "./onboarding/provider-selection.js";
 import {
   Prompter,
   runInit,
@@ -604,8 +605,22 @@ async function runCommand(
         environment,
         noInput: parsed.options.has("--no-input"),
         isTty: io.isTty ?? terminal?.isTty ?? false,
+        codexHome,
         prompter: new Prompter(io.readLine ?? terminal?.readLine ?? (() => ""), io.stderr),
         writeOut: io.stdout,
+        chooseProviders: () =>
+          promptInitProviders({
+            ...(terminal === undefined ? {} : { terminal }),
+            readLine: io.readLine ?? (() => ""),
+            write: io.stderr,
+          }),
+        chooseDefault: (usable) =>
+          promptInitDefault({
+            ...(terminal === undefined ? {} : { terminal }),
+            readLine: io.readLine ?? (() => ""),
+            write: io.stderr,
+            usable,
+          }),
         chooseClients: async (clients) => {
           if (terminal) {
             return promptSelect({
