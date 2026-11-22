@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { failureReportLines } from "./cli/failure-messages.js";
+import { promptSelect } from "./cli/terminal-select.js";
 import { TerminalInputError, terminalInput } from "./cli/terminal-io.js";
 
 import { VERSION } from "./version.js";
@@ -28,6 +29,11 @@ import type { OllamaStatus } from "./doctor/model.js";
 import { buildEnvironment, probeOllamaDown } from "./doctor/snapshot.js";
 import { stringifyJsonPreservingNumbers } from "./serialization/json-numbers.js";
 import { runProfile } from "./onboarding/profiles.js";
+import {
+  CLIENT_SELECTION_HINT,
+  CLIENT_SELECTION_TITLE,
+  clientsFromLine,
+} from "./onboarding/client-selection.js";
 import {
   Prompter,
   runInit,
@@ -600,6 +606,23 @@ async function runCommand(
         isTty: io.isTty ?? terminal?.isTty ?? false,
         prompter: new Prompter(io.readLine ?? terminal?.readLine ?? (() => ""), io.stderr),
         writeOut: io.stdout,
+        chooseClients: async (clients) => {
+          if (terminal) {
+            return promptSelect({
+              input: terminal,
+              write: io.stderr,
+              title: CLIENT_SELECTION_TITLE,
+              hint: CLIENT_SELECTION_HINT,
+              mode: "multiple",
+              items: clients.map((client) => ({
+                id: client.id,
+                label: `${client.name}  ${client.skillsDirectory}`,
+                value: client,
+              })),
+            });
+          }
+          return clientsFromLine(await (io.readLine ?? (() => ""))(), clients);
+        },
       });
     } catch (error) {
       if (!(error instanceof TerminalInputError)) throw error;

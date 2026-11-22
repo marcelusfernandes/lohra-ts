@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getProviderProfile } from "../providers/registry.js";
-import { writeExportable } from "../skills/export.js";
+import { listSkillClients, type SkillClient } from "../skills/clients.js";
+import { installSelectedClients } from "./client-selection.js";
 import { upsertEnvFile } from "./env-write.js";
 
 export const MARKER_NAME = ".initialized";
@@ -232,7 +233,8 @@ export async function runConfigure(options: {
   readonly base: string;
   readonly environment: Record<string, string>;
   readonly writeOut: (text: string) => void;
-}): Promise<string[]> {
+  readonly chooseClients: (clients: readonly SkillClient[]) => Promise<readonly SkillClient[]>;
+}): Promise<number> {
   const updates: Record<string, string> = {};
   const suggested =
     options.snapshot.detectedProvider || (options.snapshot.ollama.alive ? "ollama" : "");
@@ -262,33 +264,24 @@ export async function runConfigure(options: {
     const model = await options.prompter.ask("default model", suggestedModel);
     if (model && model !== current) updates.LOHRA_MODEL = model;
   }
-  const present = options.snapshot.harnesses.filter(
-    (harness) => harness.installed || harness.homePresent,
-  );
-  const exportKit =
-    present.length > 0 &&
-    (await options.prompter.confirm(
-      `export the use-lohra kit to ${present.map((harness) => harness.name).join(", ")}?`,
-      false,
-    ));
-  const written = Object.keys(updates).length
-    ? upsertEnvFile(join(options.base, ".env"), updates)
-    : [];
-  Object.assign(options.environment, updates);
-  if (exportKit) {
-    for (const harness of present) {
-      const destination = join(harness.home, "skills");
-      try {
-        options.prompter.note(`  wrote ${writeExportable("use-lohra", destination)}`);
-      } catch (error) {
-        options.prompter.note(
-          `  could not export to ${destination}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+  const catalog = listSkillClients(options.environment);
+  const picked = await options.chooseClients(catalog);
+  for (const client of picked) {
+    if (!catalog.some((item) => item.id === client.id)) {
+      throw new Error(
+        `unknown skill client '${client.id}' — choose Claude Code, Codex, OpenCode, or Pi`,
+      );
     }
   }
+  const pickedIds = new Set(picked.map((client) => client.id));
+  const selected = catalog.filter((client) => pickedIds.has(client.id));
+  if (Object.keys(updates).length) upsertEnvFile(join(options.base, ".env"), updates);
+  Object.assign(options.environment, updates);
+  const failures = installSelectedClients(selected, (line) => {
+    options.prompter.note(line);
+  });
   options.writeOut(`${evaluateOnboarding(options.snapshot, options.environment)[1]}\n`);
-  return written;
+  return failures;
 }
 
 export async function runInit(options: {
@@ -300,13 +293,14 @@ export async function runInit(options: {
   readonly isTty: boolean;
   readonly prompter: Prompter;
   readonly writeOut: (text: string) => void;
+  readonly chooseClients: (clients: readonly SkillClient[]) => Promise<readonly SkillClient[]>;
 }): Promise<number> {
   options.writeOut(renderOnboardingReport(options.snapshot));
   if (options.noInput || !options.snapshot.interactive || !options.isTty) {
     options.writeOut(`${evaluateOnboarding(options.snapshot, options.environment)[1]}\n`);
     return 0;
   }
-  await runConfigure(options);
+  const failures = await runConfigure(options);
   writeMarker(options.home);
-  return 0;
+  return failures > 0 ? 2 : 0;
 }
