@@ -133,6 +133,77 @@ describe("terminal input", () => {
     const nonTty = fixture(false);
     expect(nonTty.input.isTty).toBe(false);
     await expect(nonTty.input.readLine()).rejects.toThrow(/TTY/);
+    await expect(nonTty.input.readKey()).rejects.toThrow(/TTY/);
     nonTty.input.close();
+  });
+  it("rejects arrow sequences while a hidden line is being read", async () => {
+    const { stream, input } = fixture();
+    const pending = input.readLine();
+    stream.write("\x1b[A");
+    await expect(pending).rejects.toThrow("unsupported control");
+    input.close();
+    expect(stream.isRaw).toBe(false);
+    expect(stream.listenerCount("data")).toBe(0);
+  });
+  it("reads keys without echoing them and keeps a single data listener", async () => {
+    const writes: string[] = [];
+    const { stream } = fixture();
+    const input = terminalInput(stream as unknown as ReadStream, true, (value) => {
+      writes.push(value);
+    });
+    const before = process.listenerCount("SIGINT");
+    const up = input.readKey();
+    expect(stream.listenerCount("data")).toBe(1);
+    stream.write("\x1b");
+    stream.write("[A");
+    expect(await up).toEqual({ kind: "up" });
+    const next = input.readKey();
+    stream.write(" \x1b[B\x1bOC\x1bOD\rq");
+    expect(await next).toEqual({ kind: "space" });
+    expect(await input.readKey()).toEqual({ kind: "down" });
+    expect(await input.readKey()).toEqual({ kind: "right" });
+    expect(await input.readKey()).toEqual({ kind: "left" });
+    expect(await input.readKey()).toEqual({ kind: "enter" });
+    expect(await input.readKey()).toEqual({ kind: "char", value: "q" });
+    expect(writes.join("")).not.toContain("\x1b[A");
+    expect(writes.join("")).not.toContain("q");
+    const pending = input.readKey();
+    await expect(input.readLine()).rejects.toThrow("already reading");
+    stream.write("\u0003");
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(process.listenerCount("SIGINT")).toBe(before);
+    expect(stream.isRaw).toBe(false);
+    expect(stream.listenerCount("data")).toBe(0);
+    input.close();
+  });
+  it("bounds a burst of keys and times out an idle key read", async () => {
+    const burst = fixture();
+    const first = burst.input.readKey();
+    const rejection = expect(first).rejects.toThrow(/limit/);
+    burst.stream.write("\x1b[B".repeat(40));
+    await rejection;
+    burst.input.close();
+    expect(burst.stream.isRaw).toBe(false);
+    vi.useFakeTimers();
+    const idle = fixture();
+    try {
+      const pending = idle.input.readKey();
+      const rejection = expect(pending).rejects.toThrow("timed out");
+      await vi.advanceTimersByTimeAsync(300000);
+      await rejection;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(idle.stream.isRaw).toBe(false);
+    } finally {
+      idle.input.close();
+      vi.useRealTimers();
+    }
+  });
+  it("rejects an unrecognized escape while reading keys", async () => {
+    const { stream, input } = fixture();
+    const pending = input.readKey();
+    stream.write("\x1b[3~");
+    await expect(pending).rejects.toThrow("unsupported control");
+    input.close();
+    expect(stream.listenerCount("data")).toBe(0);
   });
 });
