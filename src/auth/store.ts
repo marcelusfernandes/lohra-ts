@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
+import { profileBaseHome } from "../config/paths.js";
 import { jsonFloat, stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 import { atomicWritePrivate0600 } from "./json-file.js";
 import {
@@ -30,7 +31,24 @@ const object = (value: unknown): Record<string, unknown> | null =>
 export const authPath = (home: string): string => join(home, "auth.json");
 export const tokenPath = (home: string): string => join(home, "oauth.json");
 
+/**
+ * Config de autenticação efetiva de `home` (#999): o `auth.json` do próprio
+ * home ou, num profile que ainda não tem o seu, o do home base — a rota,
+ * o consentimento e a preferência que o `lohra init` gravou. Um `auth.json`
+ * no profile (`lohra auth enable|disable|prefer --profile x`) sobrepõe por
+ * inteiro. Só a config é herdada: o login OAuth próprio (`readTokens`)
+ * continua por home, para a rotação do refresh token não cruzar homes
+ * (#354/#357).
+ */
 export function readConfig(home: string): SubscriptionConfig | null {
+  if (!existsSync(authPath(home))) {
+    const base = profileBaseHome(home);
+    return base === null ? null : readOwnConfig(base);
+  }
+  return readOwnConfig(home);
+}
+
+function readOwnConfig(home: string): SubscriptionConfig | null {
   const text = bounded(authPath(home));
   if (text === null) return null;
   try {

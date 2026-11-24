@@ -37,7 +37,9 @@ only changes which config the SAME binary reads, never which binary runs.
    never reads stdin or prompts, and this flag turns any remaining
    confirmation into a fast failure instead of a hang. A dedicated
    `--profile` keeps this project's sessions, memory and skills isolated
-   from any other `lohra chat` run on the same machine.
+   from any other `lohra chat` run on the same machine. Until it has an
+   auth config of its own, a new profile uses the provider route chosen in
+   `lohra init`, so it works right after setup.
 
 4. Add `--yolo` only when the user has explicitly authorized lohra-ts to run
    commands and edit files without interactive approval. Without it, a

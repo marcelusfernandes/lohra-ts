@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { subscriptionActive } from "../auth/credentials.js";
@@ -67,10 +67,13 @@ export function runProfile(
   }
   const home = ensureHome(join(options.base, "profiles", name));
   let stdout = `created profile '${name}' at ${home}\n`;
-  if (subscriptionActive(options.base) && !subscriptionActive(home)) {
+  // #999: sem auth.json próprio, o profile herda a rota do base (a que o
+  // `lohra init` gravou) — `readConfig`, src/auth/store.ts.
+  if (!existsSync(join(home, "auth.json")) && existsSync(join(options.base, "auth.json"))) {
     stdout +=
-      "note: this profile does NOT inherit your subscription — it will bill a paid " +
-      `API key until you run:  lohra auth enable --profile ${name}\n`;
+      `note: this profile inherits the auth route in ${join(options.base, "auth.json")}` +
+      (subscriptionActive(home) ? " (Codex subscription)" : "") +
+      ` until you run  lohra auth enable|disable|prefer --profile ${name}\n`;
   }
   return { code: 0, stdout, stderr: "" };
 }

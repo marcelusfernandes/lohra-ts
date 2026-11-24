@@ -39,6 +39,8 @@ lohra chat "What is in this directory?"
 
 `lohra chat` is one turn. `--json` prints a machine-readable result. Resume with `lohra chat --session ID "..."`.
 
+`--profile NAME` keeps sessions, memory and skills apart. A profile with no `auth.json` of its own uses the route `lohra init` saved in `~/.lohra/auth.json`. `lohra auth enable|disable|prefer --profile NAME` gives it its own. Lohra's own login (`lohra auth login`) is per profile.
+
 A workflow does not start from the CLI. There is no `lohra workflow run`. Ask for one in a turn; the agent calls `run_workflow`. The smallest spec is one `agent` node:
 
 ```json
