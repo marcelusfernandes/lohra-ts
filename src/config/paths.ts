@@ -34,6 +34,14 @@ export function validateProfileName(name: string): string {
   return name;
 }
 
+/**
+ * Home base de um home de profile (`<base>/profiles/<nome>`), ou `null`
+ * quando `home` não é um home de profile (#999). Stub do `test(red)`.
+ */
+export function profileBaseHome(_home: string): string | null {
+  throw new Error("not implemented (#999)");
+}
+
 function expandUser(path: string, userHome: string): string {
   return path === "~" ? userHome : path.startsWith("~/") ? join(userHome, path.slice(2)) : path;
 }
