@@ -1,3 +1,4 @@
+import { resolveCodexDefaultModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { stringifyJsonPreservingNumbers } from "../serialization/json-numbers.js";
 
@@ -59,7 +60,11 @@ export async function runChatBoundary(options: {
       await resolveCredentials(options.home, { codexHome: options.codexHome });
       return {
         code: 2,
-        stdout: envelope(options.input, "gpt-5.5", "subscription transport is not available"),
+        stdout: envelope(
+          options.input,
+          resolveCodexDefaultModel(options.codexHome),
+          "subscription transport is not available",
+        ),
         stderr: "lohra: chat transport is not implemented in the TypeScript bootstrap\n",
       };
     } catch (error) {
@@ -67,7 +72,7 @@ export async function runChatBoundary(options: {
       const message = `subscription mode: ${detail}`;
       return {
         code: 2,
-        stdout: envelope(options.input, "gpt-5.5", message),
+        stdout: envelope(options.input, resolveCodexDefaultModel(options.codexHome), message),
         stderr: `${message}\n`,
       };
     }

@@ -1,3 +1,4 @@
+import { noCodexModelMessage, resolveCodexDefaultModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials, subscriptionActive } from "../auth/credentials.js";
 import {
   CODEX_PROVIDER,
@@ -108,6 +109,18 @@ export class ClientPool {
     }
   }
 
+  /** Modelo padrão do provedor no pool. No Codex, a mesma resolução do chat. */
+  public fallbackModel(profile: ProviderProfile): string | null {
+    if (profile.name === CODEX_PROVIDER.name) {
+      return resolveCodexDefaultModel(this.options.codexHome ?? "");
+    }
+    return profile.fallbackModels[0] ?? null;
+  }
+
+  public get codexHome(): string {
+    return this.options.codexHome ?? "";
+  }
+
   public async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -143,10 +156,12 @@ export async function configureFor(
   if (options.provider) {
     if (pool === null) throw new ProviderError("cross-provider delegation is not available here");
     pair = await pool.get(options.provider);
-    model ??= pair[0].fallbackModels[0] ?? null;
+    model ??= pool.fallbackModel(pair[0]);
     if (model === null)
       throw new ProviderError(
-        `provider '${options.provider}' has no default model — pass an explicit model`,
+        pair[0].name === CODEX_PROVIDER.name
+          ? noCodexModelMessage(pool.codexHome)
+          : `provider '${options.provider}' has no default model — pass an explicit model`,
       );
   }
   return {
