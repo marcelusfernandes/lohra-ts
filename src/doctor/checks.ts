@@ -125,7 +125,10 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
               name: "provider",
               state: "fail",
               detail: "subscription mode is enabled but there is no login to use",
-              remedy: "lohra auth login   # or reuse the Codex CLI login: codex login",
+              remedy:
+                environment.active_profile !== null
+                  ? `lohra auth login --profile ${environment.active_profile}   # own login is per profile; or reuse the Codex CLI login: codex login`
+                  : "lohra auth login   # or reuse the Codex CLI login: codex login",
             }
         : provider === undefined && !ollamaReady
           ? {
@@ -206,7 +209,10 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
     : {
         name: "login",
         state: "ok",
-        detail: "no own login (subscription mode only: lohra auth login)",
+        detail:
+          environment.active_profile !== null
+            ? `no own login on this profile — a Codex CLI login (\`codex login\`) is enough; \`lohra auth login\` is per profile (\`lohra auth login --profile ${environment.active_profile}\`)`
+            : "no own login — a Codex CLI login (`codex login`) is enough; `lohra auth login` is per profile",
         remedy: "",
       };
   const profileCheck: Check = environment.subscription_divergence

@@ -73,7 +73,10 @@ export function runProfile(
     stdout +=
       `note: this profile inherits the auth route in ${join(options.base, "auth.json")}` +
       (subscriptionActive(home) ? " (Codex subscription)" : "") +
-      ` until you run  lohra auth enable|disable|prefer --profile ${name}\n`;
+      ` until you run  lohra auth enable|disable|prefer --profile ${name}. ` +
+      "An API key or a Codex CLI login (`codex login`) works from that route. " +
+      "Lohra's own login (`lohra auth login`) is not inherited" +
+      ` — run  lohra auth login --profile ${name}  if that is how you signed in.\n`;
   }
   return { code: 0, stdout, stderr: "" };
 }
