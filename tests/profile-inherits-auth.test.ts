@@ -115,6 +115,29 @@ describe("profile sem auth.json próprio herda o do base (issue #999)", () => {
 const jwt = (exp: number): string =>
   `x.${Buffer.from(JSON.stringify({ exp, chatgpt_account_id: "acct-999" })).toString("base64url")}.y`;
 
+describe("lohra doctor --profile num profile que herda (issue #999)", () => {
+  it("não avisa divergência e aponta o auth.json do base", async () => {
+    const { root, base } = layout();
+    initCodexDefault(base);
+    const stdout: string[] = [];
+    await runCli(["doctor", "--profile", "ts-demo", "--json"], {
+      environment: { HOME: root, LOHRA_HOME: base, CODEX_HOME: join(root, ".codex") },
+      stdout: (value) => stdout.push(value),
+      stderr: () => undefined,
+      probeOllama: () => Promise.resolve(false),
+    });
+    const report = JSON.parse(stdout.join("")) as {
+      checks: { name: string; state: string; detail: string }[];
+      environment: { subscription_divergence: boolean };
+    };
+    expect(report.environment.subscription_divergence).toBe(false);
+    const subscription = report.checks.find((check) => check.name === "subscription");
+    expect(subscription?.detail).toContain(join(base, "auth.json"));
+    expect(subscription?.detail).not.toContain(join(base, "profiles"));
+    expect(report.checks.find((check) => check.name === "profile")?.state).toBe("ok");
+  });
+});
+
 describe("lohra chat --profile ts-<projeto> logo depois do init (issue #999)", () => {
   it("usa a rota Codex do base em vez de 'no provider configured'", async () => {
     const { root, base } = layout();

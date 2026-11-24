@@ -100,7 +100,11 @@ export function runChecks(environment: DoctorEnvironment): readonly Check[] {
     (entry) => entry.installed === true || entry.home_present === true,
   );
   const workflowPolicy = join(environment.home, "workflow_policy.json");
-  const subscriptionPath = join(environment.home, "auth.json");
+  // #999: um profile sem auth.json próprio usa o do base (`readConfig`).
+  const subscriptionPath =
+    environment.active_profile !== null && !environment.lohra_auth_present
+      ? join(environment.base, "auth.json")
+      : join(environment.home, "auth.json");
   const providerCheck: Check =
     environment.auth_route === "unusable"
       ? {
