@@ -21,7 +21,7 @@ import { runWorkflowCommand } from "./commands/workflow.js";
 import { runDashboard } from "./commands/dashboard.js";
 import { runUpdate } from "./commands/update.js";
 import { runSkills } from "./commands/skills.js";
-import { readCodexModel } from "./auth/codex.js";
+import { resolveCodexDefaultModel } from "./auth/codex.js";
 import { subscriptionActive } from "./auth/credentials.js";
 import type { OAuthPost } from "./auth/oauth.js";
 import { runDoctor } from "./doctor/index.js";
@@ -727,13 +727,14 @@ async function runCommand(
   }
   if (command === "models") {
     const provider = parsed.options.get("--provider") as string | undefined;
+    const subscriptionModel = resolveCodexDefaultModel(codexHome);
     const result = await runModels({
       json,
       home: paths.home,
       environment,
       probeOllama: normalizeProbe,
       subscriptionActive: subscriptionActive(paths.home),
-      subscriptionModel: readCodexModel(codexHome) ?? "gpt-5.5",
+      ...(subscriptionModel === null ? {} : { subscriptionModel }),
       ...(provider === undefined ? {} : { provider }),
     });
     io.stdout(result.stdout);

@@ -74,8 +74,10 @@ describe("public auth surfaces", () => {
     });
     const noLogin = await invoke(["chat", "fixture", "--json", "--no-input"], value.environment);
     expect(noLogin.code).toBe(2);
+    // #998: sem config.toml nem models_cache.json no CODEX_HOME do fixture,
+    // não há modelo do Codex a ecoar — nunca um nome fixo.
     expect(JSON.parse(noLogin.stdout)).toMatchObject({
-      model: "gpt-5.5",
+      model: null,
       completed: false,
       api_calls: 0,
     });
@@ -117,7 +119,7 @@ describe("public auth surfaces", () => {
       source: "config",
       total: 1,
       models: ["gpt-eval-t05"],
-      detail: "subscription; no live listing — model from the Codex config",
+      detail: "subscription; no live listing — model from the Codex config or catalog",
     });
   });
 

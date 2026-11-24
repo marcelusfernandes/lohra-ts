@@ -293,7 +293,9 @@ export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
   modelsUrl: "",
   requiresApiKey: false,
   supportsVision: true,
-  fallbackModels: Object.freeze(["gpt-5.5"]),
+  // #998: sem modelo fixo. O padrão da rota Codex é o do próprio Codex
+  // (`resolveCodexDefaultModel`, src/auth/codex.ts); `--model` sobrepõe.
+  fallbackModels: Object.freeze([]),
   defaultMaxTokens: 16000,
   defaultAuxModel: "",
   modelWindows: Object.freeze({
@@ -305,8 +307,8 @@ export const CODEX_PROVIDER: ProviderProfile = Object.freeze({
   }),
   // piso do provedor — mesma fonte de modelWindows acima
   // (developers.openai.com/api/docs/models/gpt-5.5, 2026-09-10). "gpt-5.5"
-  // é o único modelo da família GPT-5.x que este perfil serve hoje
-  // (fallbackModels acima), então a janela dele é o piso da família: um
+  // é o único modelo da família GPT-5.x com janela verificada nesta tabela
+  // (o modelo em uso vem do Codex, #998), então a janela dele é o piso: um
   // modelo de subscription do Codex futuro, ainda sem entrada própria na
   // tabela, cai aqui — não em "128,000 max output tokens" (métrica
   // diferente de janela de contexto) nem no default global de 200000.

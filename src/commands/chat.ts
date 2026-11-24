@@ -11,7 +11,7 @@ import {
   type PromptMode,
 } from "../context/index.js";
 import { createTurnNoticesPort } from "../context/notices-overlay.js";
-import { readCodexModel } from "../auth/codex.js";
+import { noCodexModelMessage, resolveCodexDefaultModel } from "../auth/codex.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
 import { RefreshFailedError, TokenPersistError } from "../auth/errors.js";
 import { AuxClient } from "../agent/auxiliary.js";
@@ -231,7 +231,13 @@ export async function runChat(options: ChatCommandOptions): Promise<Result> {
     if (credentials === null)
       return runChatBoundary({ home: options.home, codexHome: options.codexHome, input });
     profile = CODEX_PROVIDER;
-    model = stringFlag(options.flags, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    // #998: o padrão é o do próprio Codex (config.toml, senão o catálogo
+    // models_cache.json), nunca um nome fixo; sem nenhum, recusa antes da rede.
+    const codexModel =
+      stringFlag(options.flags, "--model") ?? resolveCodexDefaultModel(options.codexHome);
+    if (codexModel === null)
+      return initializationError(input, null, noCodexModelMessage(options.codexHome));
+    model = codexModel;
     client = createResponsesClient({
       baseUrl: credentials.baseUrl,
       token: credentials.token,
