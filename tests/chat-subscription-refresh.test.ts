@@ -83,7 +83,7 @@ describe("runChat surfaces a failed OAuth refresh instead of swallowing it (issu
     // reaching `oauthPost` (0 calls); the swallow-only intermediate state
     // discards this attempt's error and lets chat-boundary retry (2 calls).
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // chat-boundary hardcodes `model: "gpt-5.5"` in its envelope; reaching
+    // chat-boundary echoes the Codex model in its envelope (#998); reaching
     // this codepath directly (not through the boundary) keeps it null.
     expect(envelope.model).toBeNull();
     expect(envelope.error).not.toContain("no OAuth post configured");
@@ -142,7 +142,7 @@ describe("runChat treats a successful refresh whose disk write fails as terminal
     expect(envelope.error).not.toBeNull();
     // Discriminator: exactly one refresh attempt (see comment above).
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // chat-boundary hardcodes `model: "gpt-5.5"` in its envelope; reaching
+    // chat-boundary echoes the Codex model in its envelope (#998); reaching
     // this codepath directly (not through the boundary) keeps it null.
     expect(envelope.model).toBeNull();
     expect(envelope.error).toContain("check permissions/disk space");

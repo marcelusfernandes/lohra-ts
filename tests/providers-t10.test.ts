@@ -20,7 +20,8 @@ describe("T10 provider registry", () => {
       apiMode: "responses",
       requiresApiKey: false,
       authType: "oauth_external",
-      fallbackModels: ["gpt-5.5"],
+      // #998: sem modelo fixo — o padrão vem do Codex (resolveCodexDefaultModel).
+      fallbackModels: [],
       defaultAuxModel: "",
     });
     expect(() => buildClient(CODEX_PROVIDER, "x")).toThrow(

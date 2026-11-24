@@ -29,7 +29,8 @@ describe("live-smoke responses/codex profile resolution", () => {
     expect(profile).toMatchObject({
       name: "openai-codex",
       apiMode: "responses",
-      fallbackModels: ["gpt-5.5"],
+      // #998: sem modelo fixo — o padrão vem do Codex (resolveCodexDefaultModel).
+      fallbackModels: [],
     });
   });
 

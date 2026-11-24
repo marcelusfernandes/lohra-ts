@@ -86,3 +86,20 @@ falharia por falta de modelo), rota `subscription` (onde `chat_default_provider`
 `auth_route === "unusable"` (onde `chat` cai na fronteira mesmo com
 `--provider` explícito, então a instrução não ajudaria) — o Check não
 aparece.
+
+## Modelo da rota de assinatura (Codex)
+
+Na rota `subscription`, `chat`, `dashboard` e `models` usam o mesmo modelo que
+o Codex CLI usaria (#998, `resolveCodexDefaultModel` em `src/auth/codex.ts`),
+lendo só o `CODEX_HOME` (padrão `~/.codex`), sem escrever nele:
+
+1. `--model`, quando passado;
+2. `model` do profile ativo do Codex (`profile = "x"` → `[profiles.x]`);
+3. `model` de topo do `config.toml`;
+4. o padrão do catálogo que o Codex grava em `models_cache.json`: menor
+   `priority` com `visibility: "list"`, senão o de menor `priority`.
+
+Sem nenhum dos quatro, `chat --json` recusa antes da rede (`api_calls: 0`)
+com o caminho do `config.toml` e as saídas; `dashboard` sai 2 com a mesma
+mensagem. Não existe nome de modelo fixo como padrão. A escolha de modelos por
+tier/workflow (`workflow_tiers.json`) segue independente disto.

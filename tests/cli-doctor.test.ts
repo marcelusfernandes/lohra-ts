@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -569,6 +569,10 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
     // precedência sobre qualquer chave de API (chat.ts:184-238 nunca chama
     // `detectChatProvider` nesse ramo).
     const envWithKey = { ...env, ANTHROPIC_API_KEY: "sk-t633-fake" };
+    // #998: a rota Codex usa o modelo do próprio Codex; sem config nem
+    // catálogo ela recusa antes da rede. Este config.toml dá o modelo.
+    mkdirSync(join(base, "codex"), { recursive: true });
+    writeFileSync(join(base, "codex", "config.toml"), 'model = "gpt-codex-t633"\n');
 
     // A rota subscription fala com chatgpt.com por um client Node https
     // direto (não o `LOHRA_PROVIDER_BASE_URL` que a rota api_key aceita) --
@@ -597,17 +601,17 @@ describe("doctor × chat, chat_default_provider respeita a rota (issue #633)", (
     // externo de `chat.ts` sempre ecoa o `model` de escopo externo que
     // construía a requisição (mesma garantia que
     // tests/chat-subscription-provider-flag.test.ts pina) -- na rota Codex é
-    // `readCodexModel(codexHome) ?? "gpt-5.5"` (chat.ts:231; este
-    // `codexHome` não tem `config.toml`, então cai no fallback "gpt-5.5");
+    // o modelo do Codex (`resolveCodexDefaultModel`, #998; aqui o
+    // `config.toml` acima dá "gpt-codex-t633");
     // na rota Anthropic seria o fallback de `src/providers/registry.ts`
-    // ("claude-opus-4-8"), nunca "gpt-5.5". A URL interceptada reforça a
+    // ("claude-opus-4-8"), nunca "gpt-codex-t633". A URL interceptada reforça a
     // mesma prova: só é `CODEX_PROVIDER.baseUrl` (hardcoded também em
     // `SubscriptionCredentials.baseUrl`) na rota Codex.
     expect(postSpy).toHaveBeenCalled();
     const request = postSpy.mock.calls[0]?.[0] as { readonly url: string };
     expect(request.url.startsWith(CODEX_PROVIDER.baseUrl)).toBe(true);
     const chatEnvelope = JSON.parse(chatStdout.join("")) as { model: string | null };
-    expect(chatEnvelope.model).toBe("gpt-5.5");
+    expect(chatEnvelope.model).toBe("gpt-codex-t633");
 
     const doctorStdout: string[] = [];
     const doctorCode = await runCli(["doctor", "--json"], {

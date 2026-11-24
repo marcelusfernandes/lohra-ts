@@ -3,7 +3,7 @@ import { generateSessionToken } from "../gateway/auth.js";
 import { LEVELS } from "../cli/arg-validation.js";
 import { registerShutdownTrigger } from "../cli/shutdown-trigger.js";
 import { resolveAuthRoute, resolveCredentials } from "../auth/credentials.js";
-import { readCodexModel } from "../auth/codex.js";
+import { noCodexModelMessage, resolveCodexDefaultModel } from "../auth/codex.js";
 import {
   CODEX_PROVIDER,
   getProviderProfile,
@@ -200,7 +200,14 @@ export async function runDashboard(options: DashboardCommandOptions): Promise<nu
       options.stderr("subscription mode: not logged in\n");
       return 2;
     }
-    model = stringFlag(options.flags, "--model") ?? readCodexModel(options.codexHome) ?? "gpt-5.5";
+    // #998: mesmo padrão do chat — o do Codex, nunca um nome fixo.
+    const codexModel =
+      stringFlag(options.flags, "--model") ?? resolveCodexDefaultModel(options.codexHome);
+    if (codexModel === null) {
+      options.stderr(`${noCodexModelMessage(options.codexHome)}\n`);
+      return 2;
+    }
+    model = codexModel;
     // The real profile name ("openai-codex"), never the string literal
     // "codex" -- that alias was never registered on purpose (see
     // getProviderProfileIncludingCodex, src/providers/registry.ts), so it

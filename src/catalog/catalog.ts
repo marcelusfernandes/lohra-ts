@@ -188,13 +188,21 @@ export async function buildCatalog(
   if (options.providers?.map((p) => p.toLowerCase()).includes(subscriptionProvider))
     return new Catalog([
       options.subscriptionActive
-        ? new ProviderModels(
-            subscriptionProvider,
-            "config",
-            [options.subscriptionModel ?? "gpt-5.5"],
-            1,
-            "subscription; no live listing — model from the Codex config",
-          )
+        ? options.subscriptionModel === undefined
+          ? new ProviderModels(
+              subscriptionProvider,
+              "config",
+              [],
+              0,
+              "subscription; no model in the Codex config.toml or models_cache.json — pass --model or run `codex` once",
+            )
+          : new ProviderModels(
+              subscriptionProvider,
+              "config",
+              [options.subscriptionModel],
+              1,
+              "subscription; no live listing — model from the Codex config or catalog",
+            )
         : new ProviderModels(
             subscriptionProvider,
             "skipped",
