@@ -39,3 +39,16 @@ export function readCodexModel(codexHome: string): string | null {
   const match = /^\s*model\s*=\s*["']([^"']+)["']\s*$/m.exec(raw);
   return match?.[1] || null;
 }
+
+/**
+ * Modelo padrão da rota Codex, resolvido como o Codex CLI resolve (#998).
+ * Stub do `test(red)`: a implementação vem no commit seguinte.
+ */
+export function resolveCodexDefaultModel(_codexHome: string): string | null {
+  throw new Error("not implemented (#998)");
+}
+
+/** Mensagem acionável quando nenhum modelo do Codex é resolvível (#998). */
+export function noCodexModelMessage(_codexHome: string): string {
+  throw new Error("not implemented (#998)");
+}
