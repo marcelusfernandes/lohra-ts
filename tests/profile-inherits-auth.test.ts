@@ -5,7 +5,7 @@
 // "no provider configured" logo depois do init. Agora um profile sem
 // `auth.json` próprio herda o do base; um `auth.json` próprio continua
 // isolando; o login OAuth próprio (`oauth.json`) nunca é herdado.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -110,6 +110,17 @@ describe("profile sem auth.json próprio herda o do base (issue #999)", () => {
     expect(result.stdout).toContain("inherits");
     expect(subscriptionActive(join(base, "profiles", "novo"))).toBe(true);
   });
+
+  it("profile create avisa que o lohra auth login não é herdado", () => {
+    const { base } = layout();
+    initCodexDefault(base);
+    const result = runProfile("create", "novo", { base, activeProfile: null });
+    expect(result.stdout).toContain("lohra auth login");
+    expect(result.stdout).toContain("is not inherited");
+    expect(result.stdout).toContain("--profile novo");
+    expect(result.stdout).toContain("codex login");
+    expect(result.stdout).not.toContain("works right after setup");
+  });
 });
 
 const jwt = (exp: number): string =>
@@ -183,5 +194,57 @@ describe("lohra chat --profile ts-<projeto> logo depois do init (issue #999)", (
     const request = postSpy.mock.calls[0]?.[0] as { readonly url: string };
     expect(request.url.startsWith(CODEX_PROVIDER.baseUrl)).toBe(true);
     expect(envelope.model).toBe("gpt-999");
+  });
+});
+
+describe("lohra doctor --profile quando só o login próprio está no base (issue #999)", () => {
+  it("aponta lohra auth login --profile e não trata o oauth do base como herdado", async () => {
+    const { root, base } = layout();
+    initCodexDefault(base);
+    writeTokens(base, {
+      accessToken: "base-access",
+      refreshToken: "base-refresh",
+      accountId: "acct-999",
+      expiresAt: Date.now() / 1000 + 999_999,
+    });
+    const stdout: string[] = [];
+    await runCli(["doctor", "--profile", "ts-demo", "--json"], {
+      environment: { HOME: root, LOHRA_HOME: base, CODEX_HOME: join(root, "no-codex") },
+      stdout: (value) => stdout.push(value),
+      stderr: () => undefined,
+      probeOllama: () => Promise.resolve(false),
+    });
+    const report = JSON.parse(stdout.join("")) as {
+      checks: { name: string; state: string; detail: string; remedy?: string }[];
+    };
+    const provider = report.checks.find((check) => check.name === "provider");
+    expect(provider?.state).toBe("fail");
+    expect(provider?.remedy ?? "").toContain("lohra auth login --profile ts-demo");
+    expect(provider?.remedy ?? "").toContain("codex login");
+    const login = report.checks.find((check) => check.name === "login");
+    expect(login?.detail).toContain("per profile");
+    expect(login?.detail).toContain("--profile ts-demo");
+    expect(login?.detail).not.toContain("base-access");
+  });
+});
+
+describe("skill e mensagens não prometem o login OAuth herdado (issue #999)", () => {
+  it("use-lohra-ts não diz que o chat funciona logo depois do setup em qualquer login", () => {
+    const skill = readFileSync(
+      new URL("../assets/skills/use-lohra-ts/SKILL.md", import.meta.url),
+      "utf8",
+    );
+    expect(skill).not.toContain("so it works right after setup");
+    expect(skill).toContain("lohra auth login");
+    expect(skill).toContain("is not inherited");
+    expect(skill).toContain("codex login");
+    expect(skill).toContain("--profile ts-<project>");
+  });
+
+  it("README diz que o login próprio é por profile e não é herdado", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    expect(readme).toContain("lohra auth login");
+    expect(readme).toContain("is not inherited");
+    expect(readme).toContain("codex login");
   });
 });
