@@ -48,7 +48,7 @@ describe("T22 public documentation", () => {
   it("documents the exact public CLI and current package", () => {
     const readme = read("README.md");
     expect(readme, "MUTATION_CAUSE:T22-docs-current-version").toContain(
-      `Current version: \`${packageJson.version}\`. Changes since \`0.0.12\` are in the CHANGELOG.`,
+      `Current version: \`${packageJson.version}\`. Changes since \`0.1.0\` are in the CHANGELOG.`,
     );
 
     // Fonte da verdade dos comandos públicos é `COMMAND_SUMMARY`

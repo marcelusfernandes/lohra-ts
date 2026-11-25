@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.1] - 2026-11-26
+
+This cut follows published npm `0.1.0` (tag `v0.1.0`, merge `fe15fe0b`, PR #993). The grouped lists under Added through CI are every first-parent merge on `main` after that tag through `7e1da72b` (PR #1004). Each grouped line is the merge title, unchanged. A parenthetical number is the pull request; the issue number is added when the title did not already include it.
+
+### Highlights
+
+- **Onboarding (M13).** `lohra init` selects skill clients with the keyboard (#938, PR #995) and configures Claude (Anthropic API), Codex (subscription), and OpenRouter, with one explicit default (#939, PR #997).
+- **Codex default model (#998, PR #1003).** On the subscription route, `chat`, `dashboard`, and `models` use the model from the user's Codex `config.toml` (active Codex profile, then top-level `model`) or, if unset, Codex's own default in `models_cache.json`. There is no hardcoded model name. If neither is present, `chat` refuses before the network and tells you to set `model`, pass `--model`, or run `codex` once.
+- **Project profiles inherit the init route (#999, PR #1004).** `lohra chat --profile ts-<project>` uses `~/.lohra/auth.json` until the profile has its own. That covers an API key and a Codex CLI login (`codex login`). Lohra's own login (`lohra auth login`, `oauth.json`) is per profile and is not inherited.
+
+### Added
+
+- feat(init): configurar provedores e escolher o padrão explicitamente (#939) (#997)
+- feat(init): selecionar clientes por teclado e instalar suas skills (#938) (#995)
+
+### Fixed
+
+- fix(profile): profile novo herda a rota e o consentimento do init (#999) (#1004)
+- fix(chat): usar o modelo padrão do Codex em vez de gpt-5.5 fixo (#998) (#1003)
+
+### CI
+
+- ci(release): pina npm 11.21.2 e republica v0.1.0 por workflow_dispatch (#994)
+
 ## [0.1.0] - 2026-11-05
 
 The registry version this cut follows is published npm `0.0.12` (2026-09-14). The grouped lists under Added through CI are every first-parent merge on `main` after that release merge (`43e8ab06`, PR #691) through `ef00bac4` (PR #992). There is no `v*` tag in the repository, so the cutoff is that merge rather than `git tag`. The in-repo `[0.0.13]` section further down was not published; its `doctor` fix is also listed here. Each grouped line is the merge title, unchanged. A parenthetical number is the pull request, and an issue number appears when the title already included one.

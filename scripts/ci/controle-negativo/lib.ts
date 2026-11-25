@@ -273,6 +273,9 @@ const ARQUIVOS_DE_RELEASE = new Set([
   "tests/t22-docs.test.ts",
   "tests/ci-controle-negativo.test.ts",
   "scripts/ci/controle-negativo/lib.ts",
+  // A skill que o init instala viaja no tarball; a PR de release pode
+  // alinhá-la ao comportamento do corte sem perder o SKIP.
+  "assets/skills/use-lohra-ts/SKILL.md",
 ]);
 
 export function ehPrDeRelease(branch: string, diff: readonly string[]): boolean {

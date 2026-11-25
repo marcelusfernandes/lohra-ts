@@ -55,11 +55,17 @@ only changes which config the SAME binary reads, never which binary runs.
    analyze or recommend.
 
 5. `--model`/`--provider` override this run's routing; leave them unset to
-   use the profile's own configuration. `--max-parallel` caps how many tool
-   calls lohra-ts runs at once (default 4). `--max-iterations` raises the
-   agent-loop ceiling above its default of 90 — raise it, not any timeout,
-   if a long task dies with `max_iterations (N) reached`: that error counts
-   tool-call rounds, not wall-clock time.
+   use the profile's own configuration. On the Codex subscription route,
+   that model is the one in the user's Codex config (`model =` in
+   `$CODEX_HOME/config.toml`) or, if unset, Codex's own default from
+   `models_cache.json`. lohra-ts does not pin a model name of its own. If
+   neither is present, the command exits before any network call and tells
+   you to set `model`, pass `--model`, or run `codex` once. `--max-parallel`
+   caps how many tool calls lohra-ts runs at once (default 4).
+   `--max-iterations` raises the agent-loop ceiling above its default of
+   90 — raise it, not any timeout, if a long task dies with
+   `max_iterations (N) reached`: that error counts tool-call rounds, not
+   wall-clock time.
 
 ## Verify the delegation
 
