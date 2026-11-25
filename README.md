@@ -16,7 +16,7 @@ lohra --version
 lohra doctor
 ```
 
-Current version: `0.1.0`. Changes since `0.0.12` are in the CHANGELOG.
+Current version: `0.1.1`. Changes since `0.1.0` are in the CHANGELOG.
 
 Windows is in progress and is not a supported platform. A green Linux run is not a Windows promise. What the runtime already does with a Windows home, credentials, and generated images is in [docs/windows-home.md](docs/windows-home.md).
 
@@ -40,6 +40,8 @@ lohra chat "What is in this directory?"
 `lohra chat` is one turn. `--json` prints a machine-readable result. Resume with `lohra chat --session ID "..."`.
 
 `--profile NAME` keeps sessions, memory and skills apart. A profile with no `auth.json` of its own uses the route `lohra init` saved in `~/.lohra/auth.json`. That covers an API key and a Codex CLI login (`codex login`). `lohra auth enable|disable|prefer --profile NAME` gives it its own route. Lohra's own login (`lohra auth login`) is per profile and is not inherited.
+
+On the Codex subscription route, `chat` uses the model from the user's Codex config (`model =` in `~/.codex/config.toml`, including the active Codex profile) or, if that is unset, Codex's own default from `models_cache.json`. It does not fall back to a hardcoded model name. If neither is present, `chat` refuses before calling the network and tells you to set `model`, pass `--model`, or run `codex` once so it writes the catalog. Details: [docs/provedores-deteccao.md](docs/provedores-deteccao.md).
 
 A workflow does not start from the CLI. There is no `lohra workflow run`. Ask for one in a turn; the agent calls `run_workflow`. The smallest spec is one `agent` node:
 
@@ -107,7 +109,7 @@ MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard
 
 `import "lohra-ts"` exports `ConversationRuntime`, `SqliteConversationRepository`, `SessionRepository`, and `openStateDatabase`. The import does not open a database, read credentials, start the CLI, or connect to a provider. You pass the state path, the model transport, and the tools.
 
-## Not in 0.1.0
+## Not in 0.1.1
 
 - **Windows as a supported platform.** Milestone 25 hardening is in progress. The `windows-checks` job is informative (`continue-on-error`). This release does not make it required.
 - **A terminal UI.** The Ink TUI is not shipped (milestone 23 is still the open investigation). `dashboard` is the local gateway, not that UI.
@@ -115,7 +117,7 @@ MCP servers are read from `mcp.json` in the Lohra home when `chat` or `dashboard
 
 ## More
 
-- [CHANGELOG.md](CHANGELOG.md) — merges since published npm `0.0.12`
+- [CHANGELOG.md](CHANGELOG.md) — merges since published npm `0.1.0`
 - [docs/release.md](docs/release.md) — how a version is cut and published
 - [docs/skills-management.md](docs/skills-management.md)
 - [docs/provedores-deteccao.md](docs/provedores-deteccao.md)

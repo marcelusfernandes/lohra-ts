@@ -750,6 +750,21 @@ describe("ehPrDeRelease (issue #694, bloqueava a #691)", () => {
     ).toBe(true);
   });
 
+  it("SKIP: release/0.1.1 também carrega a skill que o init instala", () => {
+    expect(
+      ehPrDeRelease("release/0.1.1", [
+        "package.json",
+        "package-lock.json",
+        "CHANGELOG.md",
+        "README.md",
+        "tests/t22-docs.test.ts",
+        "tests/ci-controle-negativo.test.ts",
+        "scripts/ci/controle-negativo/lib.ts",
+        "assets/skills/use-lohra-ts/SKILL.md",
+      ]),
+    ).toBe(true);
+  });
+
   it("não SKIP: release com a guarda da versão e um arquivo de src/", () => {
     expect(
       ehPrDeRelease("release/0.1.0", [
