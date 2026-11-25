@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1] - 2026-11-25
+
+### Added
+
+- feat(init): configurar provedores e escolher o padrão explicitamente (#997)
+- feat(init): selecionar clientes por teclado e instalar suas skills (#995)
+
+### Fixed
+
+- fix(profile): profile novo herda a rota e o consentimento do init (#1004)
+- fix(chat): usar o modelo padrão do Codex em vez de gpt-5.5 fixo (#1003)
+
+### CI
+
+- ci(release): pina npm 11.21.2 e republica v0.1.0 por workflow_dispatch (#994)
+
 ## [0.1.0] - 2026-11-05
 
 The registry version this cut follows is published npm `0.0.12` (2026-09-14). The grouped lists under Added through CI are every first-parent merge on `main` after that release merge (`43e8ab06`, PR #691) through `ef00bac4` (PR #992). There is no `v*` tag in the repository, so the cutoff is that merge rather than `git tag`. The in-repo `[0.0.13]` section further down was not published; its `doctor` fix is also listed here. Each grouped line is the merge title, unchanged. A parenthetical number is the pull request, and an issue number appears when the title already included one.
