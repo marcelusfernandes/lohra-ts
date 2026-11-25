@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export interface LohraPaths {
   readonly base: string;
@@ -32,6 +32,17 @@ export function validateProfileName(name: string): string {
     );
   }
   return name;
+}
+
+/**
+ * Home base de um home de profile (`<base>/profiles/<nome>`, o mesmo formato
+ * que `resolvePaths` monta), ou `null` quando `home` não é um home de
+ * profile (#999).
+ */
+export function profileBaseHome(home: string): string | null {
+  const parent = dirname(home);
+  if (basename(parent) !== "profiles" || !profilePattern.test(basename(home))) return null;
+  return dirname(parent);
 }
 
 function expandUser(path: string, userHome: string): string {

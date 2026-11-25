@@ -37,7 +37,13 @@ only changes which config the SAME binary reads, never which binary runs.
    never reads stdin or prompts, and this flag turns any remaining
    confirmation into a fast failure instead of a hang. A dedicated
    `--profile` keeps this project's sessions, memory and skills isolated
-   from any other `lohra chat` run on the same machine.
+   from any other `lohra chat` run on the same machine. Until it has an
+   `auth.json` of its own, a new profile uses the provider route chosen in
+   `lohra init`. That is enough to chat right after setup when the default
+   is an API key or a Codex CLI login (`codex login`). Lohra's own login
+   (`lohra auth login`) is per profile and is not inherited — run
+   `lohra auth login --profile ts-<project>` (or `codex login`) before the
+   first chat on that profile.
 
 4. Add `--yolo` only when the user has explicitly authorized lohra-ts to run
    commands and edit files without interactive approval. Without it, a
